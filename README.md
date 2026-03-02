@@ -65,7 +65,8 @@ To generate data and upload to Google Drive, run `uv run src/gen_training.py`
     "ciphertext": "1 2 3 4 5 6 7 8 9",
     "ciphertext_with_boundaries": "1 2 3 4 _ 5 6 7 8 9"
     "source_id": "35450",
-    "source_name": "Our Cats and All About Them\r\nTheir Varieties, Habits, and Management; and for Show, the Standard of Excellence and Beauty; Described and Pictured"
+    "source_name": "Our Cats and All About Them\r\nTheir Varieties, Habits, and Management; and for Show, the Standard of Excellence and Beauty; Described and Pictured",
+    "genres": ["Sci-Fi & Fantasy"]
 }
 
 ```
