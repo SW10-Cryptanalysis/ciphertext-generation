@@ -68,6 +68,4 @@ To generate data and upload to Google Drive, run `uv run src/gen_training.py`
     "source_name": "Our Cats and All About Them\r\nTheir Varieties, Habits, and Management; and for Show, the Standard of Excellence and Beauty; Described and Pictured"
 }
 
-}
-
 ```
