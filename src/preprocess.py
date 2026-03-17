@@ -8,19 +8,21 @@ from pathlib import Path
 from dataclasses import dataclass
 
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("preprocess.py")
 
 TEXT_LEN = 10_000
 SEQ_LEN = TEXT_LEN * 2 + 3
 
+
 @dataclass
 class Config:
     """Config for arrow dataset creation."""
 
     # 10k*2 characters + BOS, EOS, SEP
-    max_context: SEQ_LEN
+    max_context: int = SEQ_LEN
     unique_homophones: int = 500
     data_dir: Path = Path(__file__).parent.parent.parent / "Ciphers"
     output_dir: Path = Path(__file__).parent.parent.parent / "outputs"
@@ -82,6 +84,7 @@ class Config:
                 logger.warning(f"Invalid or missing data in {self.homophone_file}")
                 logger.warning(f"Using default value: {self.unique_homophones}")
                 logger.warning(f"Error: {e}")
+
 
 features = Features(
     {
