@@ -18,7 +18,7 @@ SEQ_LEN = TEXT_LEN * 2 + 3
 @dataclass
 class Config:
     """Config for arrow dataset creation."""
-    
+
     # 10k*2 characters + BOS, EOS, SEP
     max_context: SEQ_LEN
     unique_homophones: int = 500
