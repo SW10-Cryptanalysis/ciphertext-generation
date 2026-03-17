@@ -12,13 +12,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger("preprocess.py")
 
+TEXT_LEN = 10_000
+SEQ_LEN = TEXT_LEN * 2 + 3
 
 @dataclass
 class Config:
     """Config for arrow dataset creation."""
-
-    # 10k characters + BOS, EOS, SEP
-    max_context: int = 10_000 + 3
+    
+    # 10k*2 characters + BOS, EOS, SEP
+    max_context: SEQ_LEN
     unique_homophones: int = 500
     data_dir: Path = Path(__file__).parent.parent.parent / "Ciphers"
     output_dir: Path = Path(__file__).parent.parent.parent / "outputs"
