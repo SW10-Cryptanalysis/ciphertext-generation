@@ -52,6 +52,22 @@ DATASETS: list[DatasetConfig] = [
         "prefix": "pg",
         "fallback_genres": ["Other / Uncategorized"],
     },
+    {
+        "path": "common-pile/news_filtered",
+        "type": "news",
+        "split_name": "train",
+        "column": "text",
+        "prefix": "news",
+        "fallback_genres": ["News"],
+    },
+    {
+        "path": "common-pile/doab_filtered",
+        "type": "doab",
+        "split_name": "train",
+        "column": "text",
+        "prefix": "doab",
+        "fallback_genres": ["Academic Books"],
+    },
 ]
 
 DEFAULT_TAXONOMY = {
