@@ -58,7 +58,7 @@ class Config:
 
     @property
     def char_offset(self) -> int:
-        """Character ofset to avoid clashes with defined tokens."""
+        """Character offset to avoid clashes with defined tokens."""
         return self.eos_token_id + 1
 
     @property
@@ -92,7 +92,7 @@ features = Features(
         "plaintext": Value("string"),
         "ciphertext_with_boundaries": Value("string"),
         "plaintext_with_boundaries": Value("string"),
-        "difficulty": Value("int32"),
+        "redundancy": Value("int32"),
     },
 )
 
@@ -165,7 +165,6 @@ class RawToArrowConverter:
             "input_ids": input_ids,
             "labels": labels,
             "raw_plaintext": example[self.t_key],
-            "difficulty": example["difficulty"],
         }
 
 
@@ -196,13 +195,16 @@ def preprocess_data() -> None:
 
         logger.info(f"Processing {split} (Spaces: {cfg.use_spaces})...")
 
-        def gen(path: Path = split_path) -> Generator[dict[str, Any], None, None]:
-            for file_path in path.iterdir():
-                if file_path.suffix == ".json":
-                    with open(file_path) as f:
-                        yield json.load(f)
+        raw_ds = Dataset.from_generator(
+            _json_generator,
+            gen_kwargs={"path": split_path},
+            features=features,
+        )
 
-        raw_ds = Dataset.from_generator(gen, features=features)
+        if not isinstance(raw_ds, Dataset):
+            raise TypeError(
+                f"Expected a Dataset from the generator, but got {type(raw_ds)}.",
+            )
 
         tokenized_ds = raw_ds.map(
             converter.tokenize_fn,
@@ -212,13 +214,19 @@ def preprocess_data() -> None:
                 "ciphertext_with_boundaries",
                 "plaintext",
                 "plaintext_with_boundaries",
-                "difficulty",
             ],
         )
 
         save_path = cfg.tokenized_dir / split
         tokenized_ds.save_to_disk(str(save_path))
         logger.info("Saved to %s", save_path)
+
+
+def _json_generator(path: Path) -> Generator[dict[str, Any], None, None]:
+    for file_path in path.iterdir():
+        if file_path.suffix == ".json":
+            with open(file_path, encoding="utf-8") as f:
+                yield json.load(f)
 
 
 if __name__ == "__main__":
