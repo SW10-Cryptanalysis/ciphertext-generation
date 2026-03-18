@@ -75,15 +75,19 @@ class TestGetTextStream:
             mock_dependencies["randomize"].return_value
         )
 
-        assert result == mock_sampler_instance.generate_stream.return_value
+        assert result == (
+            mock_sampler_instance,
+            mock_sampler_instance.generate_stream.return_value,
+        )
 
     def test_get_text_stream_custom_extractor(
         self, mocker, mock_dependencies, dummy_config
     ):
         """Test that passing a custom extractor bypasses the default initialization."""
         custom_extractor = mocker.Mock()
+        mock_sampler_instance = mock_dependencies["sampler_cls"].return_value
 
-        get_text_stream(config=dummy_config, extractor=custom_extractor)
+        result = get_text_stream(config=dummy_config, extractor=custom_extractor)
 
         mock_dependencies["extractor_cls"].assert_not_called()
 
@@ -93,4 +97,9 @@ class TestGetTextStream:
 
         mock_dependencies["sampler_cls"].assert_called_once_with(
             dummy_config, mock_dependencies["load_genres"].return_value
+        )
+
+        assert result == (
+            mock_sampler_instance,
+            mock_sampler_instance.generate_stream.return_value,
         )
