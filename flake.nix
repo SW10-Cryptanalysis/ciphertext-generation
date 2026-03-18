@@ -23,6 +23,7 @@
             buildInputs = [
               python312
               uv
+              ruff
             ];
 
             LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [

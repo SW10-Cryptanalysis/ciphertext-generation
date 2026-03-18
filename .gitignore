@@ -211,6 +211,8 @@ __marimo__/
 /ciphers
 /data
 /temp_ciphers
+/logs
+/outputs
 
 # Books
 /books
