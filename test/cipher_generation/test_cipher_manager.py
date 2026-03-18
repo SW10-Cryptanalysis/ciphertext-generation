@@ -1,8 +1,8 @@
 import pytest
 import json
 import os
+import queue
 from dataclasses import dataclass
-from unittest.mock import MagicMock
 from pathlib import Path
 
 from cipher_generation.config import CipherConfig, DatasetConfig
@@ -37,7 +37,7 @@ def manager_config():
 
 @pytest.fixture
 def manager_config_no_test():
-    """Provide a standard configuration dictionary for manager initialization."""
+    """Provide a minimal configuration dictionary for fast stream testing."""
     dataset_config = DatasetConfig(
         training_num=3,
         validation_num=0,
@@ -56,6 +56,18 @@ def manager_config_no_test():
 
 
 @pytest.fixture
+def mock_sampler(mocker):
+    """Provide a mock CorpusSampler."""
+    return mocker.Mock(spec=["requeue_target"])
+
+
+@pytest.fixture
+def mock_config_sampler(mock_sampler, manager_config):
+    """Provide a mock CipherManager with a mock sampler."""
+    return mock_sampler, manager_config
+
+
+@pytest.fixture
 def mock_mp_queue(mocker):
     """Patch multiprocessing.Queue and RLock to inject mocks."""
     mock_queue_cls = mocker.patch("multiprocessing.Queue")
@@ -63,16 +75,24 @@ def mock_mp_queue(mocker):
     mock_job_queue = mocker.Mock()
     mock_result_queue = mocker.Mock()
     mock_stats_queue = mocker.Mock()
+    mock_feedback_queue = mocker.Mock()
 
     mock_queue_cls.side_effect = [
         mock_job_queue,
         mock_result_queue,
         mock_stats_queue,
+        mock_feedback_queue,
     ]
 
     mocker.patch("multiprocessing.RLock", return_value=mocker.Mock())
 
-    return mock_queue_cls, mock_job_queue, mock_result_queue, mock_stats_queue
+    return (
+        mock_queue_cls,
+        mock_job_queue,
+        mock_result_queue,
+        mock_stats_queue,
+        mock_feedback_queue,
+    )
 
 
 class StreamSimulator:
@@ -94,6 +114,8 @@ class StreamSimulator:
 
 @dataclass
 class ExecuteCase:
+    """A dataclass for execution outcome test parameters."""
+
     id: str
     stream_mode: str
     expected_log_level: str
@@ -123,11 +145,17 @@ execute_cases = [
 
 
 class TestCipherManagerInitialization:
-    def test_initialization(self, mocker, mock_mp_queue, manager_config):
-        _, mock_job_q, mock_result_q, mock_stats_q = mock_mp_queue
+    def test_initialization(self, mocker, mock_mp_queue, mock_config_sampler):
+        """Verify the manager sets up the queues and stats properly."""
+        _, mock_job_q, mock_result_q, mock_stats_q, mock_feedback_q = mock_mp_queue
+        mock_sampler, manager_config = mock_config_sampler
         mocker.patch("os.cpu_count", return_value=6)
 
-        manager = CipherManager(config=manager_config, text_stream_source=[])
+        manager = CipherManager(
+            config=manager_config,
+            text_stream_source=[],
+            sampler=mock_sampler,
+        )
 
         assert manager.split_folders == {
             "train": "train_folder",
@@ -150,20 +178,27 @@ class TestCipherManagerInitialization:
         assert manager.job_queue == mock_job_q
         assert manager.result_queue == mock_result_q
         assert manager.stats_queue == mock_stats_q
+        assert manager.feedback_queue == mock_feedback_q
+        assert manager.sampler == mock_sampler
         assert isinstance(manager.master_stats, DatasetStatsAggregator)
 
-    def test_initialization_low_cpu(self, mocker, mock_mp_queue, manager_config):
+    def test_initialization_low_cpu(
+        self, mocker, mock_mp_queue, manager_config, mock_sampler
+    ):
+        """Verify the worker count defaults safely on low-core machines."""
         mocker.patch("os.cpu_count", return_value=2)
-        manager = CipherManager(manager_config, [])
+        manager = CipherManager(manager_config, [], mock_sampler)
         assert manager.num_workers == 1
 
 
 class TestCipherManagerExecution:
     @pytest.mark.parametrize("case", execute_cases, ids=lambda c: c.id)
     def test_execute_outcomes(
-        self, mocker, mock_mp_queue, manager_config, case: ExecuteCase
+        self, mocker, mock_mp_queue, mock_config_sampler, case: ExecuteCase
     ):
-        _, mock_job_q, mock_result_q, _ = mock_mp_queue
+        """Verify the orchestration blocks handle all stream outcomes appropriately."""
+        _, mock_job_q, mock_result_q, _, _ = mock_mp_queue
+        mock_sampler, manager_config = mock_config_sampler
 
         mock_log = mocker.patch("cipher_generation.cipher_manager.log")
         mocker.patch("os.cpu_count", return_value=4)
@@ -175,11 +210,20 @@ class TestCipherManagerExecution:
             "cipher_generation.cipher_manager.CipherProducer"
         )
 
-        mock_pbar = MagicMock()
-        mock_pbar.__enter__.return_value = mock_pbar
-        mocker.patch("tqdm.tqdm", return_value=mock_pbar)
+        manager = CipherManager(
+            manager_config, StreamSimulator(case.stream_mode), mock_sampler
+        )
 
-        manager = CipherManager(manager_config, StreamSimulator(case.stream_mode))
+        if case.stream_mode == "normal":
+            mocker.patch.object(manager, "_feeder_stream", return_value=3)
+        elif case.stream_mode == "exception":
+            mocker.patch.object(
+                manager, "_feeder_stream", side_effect=Exception("Stream Failure")
+            )
+        elif case.stream_mode == "interrupt":
+            mocker.patch.object(
+                manager, "_feeder_stream", side_effect=KeyboardInterrupt()
+            )
 
         mocker.patch.object(
             manager.stats_queue, "get", return_value=DatasetStatsAggregator()
@@ -192,7 +236,8 @@ class TestCipherManagerExecution:
             case.expected_log_snippet in str(call) for call in log_method.call_args_list
         )
         assert log_found, (
-            f"Expected to find '{case.expected_log_snippet}' in {case.expected_log_level} logs."
+            f"Expected to find '{case.expected_log_snippet}' in "
+            f"{case.expected_log_level} logs."
         )
 
         assert mock_producer_cls.call_count == 2
@@ -203,57 +248,125 @@ class TestCipherManagerExecution:
         mock_uploader_cls.assert_called_once()
         _, kwargs = mock_uploader_cls.call_args
         assert kwargs["upload_queue"] == mock_result_q
-        assert "tqdm_lock" in kwargs["config"].__dict__
 
-    def test_execute_logging_progress(self, mocker, manager_config, mock_mp_queue):
-        mock_log = mocker.patch("cipher_generation.cipher_manager.log")
+    def test_process_feedback_test_failure(self, manager_config, mock_sampler):
+        """Verify that a test split failure correctly decrements the test_tracker."""
+        manager = CipherManager(manager_config, [], mock_sampler)
+        manager.feedback_queue = queue.Queue()  # type: ignore
 
-        mock_pbar = MagicMock()
-        mock_pbar.__enter__.return_value = mock_pbar
-        mocker.patch("tqdm.tqdm", return_value=mock_pbar)
+        # Artificially increment the tracker to test decrement
+        manager.test_tracker[4000][5] = 1
 
-        mock_stream = [("train", {"text": "A"}) for _ in range(11)]
-
-        manager = CipherManager(manager_config, mock_stream)
-        manager._logging_interval = 10
-
-        mocker.patch("cipher_generation.cipher_manager.DriveUploader")
-        mocker.patch("cipher_generation.cipher_manager.CipherProducer")
-        mocker.patch.object(
-            manager.stats_queue, "get", return_value=DatasetStatsAggregator()
+        manager.feedback_queue.put(
+            {
+                "status": "fail",
+                "split": "test",
+                "target_length": 4000,
+                "target_redundancy": 5,
+            }
         )
 
-        manager.execute()
-        mock_log.debug.assert_any_call("Crossed 10 texts milestone...")
+        successes, failures = manager._process_feedback()
+
+        assert successes == 0
+        assert failures == 1
+        assert manager.test_tracker[4000][5] == 0
+        mock_sampler.requeue_target.assert_called_once_with("test", 4000)
+
+    def test_feeder_stream_processes_nacks_and_requeues(
+        self, mocker, manager_config_no_test, mock_sampler
+    ):
+        """Verify that a worker failure triggers a target requeue and replaces the text."""
+        manager_config_no_test.dataset_config.training_num = 2
+        stream = iter(
+            [
+                ("train", {"text": "A", "target_length": 100}),
+                ("train", {"text": "B", "target_length": 200}),
+                ("train", {"text": "C", "target_length": 300}),
+            ]
+        )
+        manager = CipherManager(manager_config_no_test, stream, mock_sampler)
+
+        manager.feedback_queue = queue.Queue()  # type: ignore
+        manager.job_queue = mocker.Mock()
+
+        call_counts = {"count": 0}
+
+        def mock_put(item):
+            """Simulate the first cipher failing, and the rest succeeding."""
+            call_counts["count"] += 1
+            if call_counts["count"] == 1:
+                manager.feedback_queue.put(
+                    {
+                        "status": "fail",
+                        "split": item.split,
+                        "target_length": item.text_data.get("target_length", 0),
+                        "target_redundancy": item.target_redundancy,
+                    }
+                )
+            else:
+                manager.feedback_queue.put({"status": "success"})
+
+        manager.job_queue.put.side_effect = mock_put  # type: ignore
+
+        mocker.patch("tqdm.tqdm", return_value=mocker.MagicMock())
+        successes = manager._feeder_stream(mocker.Mock())
+
+        assert successes == 2
+        assert manager.job_queue.put.call_count == 3  # type: ignore
+        mock_sampler.requeue_target.assert_called_once_with("train", 100)
 
     def test_feeder_stream_respects_total_count(
-        self, mocker, mock_mp_queue, manager_config_no_test
+        self, mocker, manager_config_no_test, mock_sampler
     ):
-        _, mock_job_q, _, _ = mock_mp_queue
+        """Verify the stream loop cleanly exits once the exact total count is reached."""
+        stream = [("train", {"text": f"text_{i}"}) for i in range(10)]
+        manager = CipherManager(manager_config_no_test, stream, mock_sampler)
 
-        large_stream = [("train", {"text": f"text_{i}"}) for i in range(10)]
+        manager.feedback_queue = queue.Queue()  # type: ignore
+        manager.job_queue = mocker.Mock()
+        manager.job_queue.put.side_effect = lambda x: manager.feedback_queue.put(  # type: ignore
+            {"status": "success"}
+        )
 
-        manager = CipherManager(manager_config_no_test, large_stream)
-        mock_log = mocker.patch("cipher_generation.cipher_manager.log")
+        mocker.patch("tqdm.tqdm", return_value=mocker.MagicMock())
 
-        mock_pbar = MagicMock()
-        mock_pbar.__enter__.return_value = mock_pbar
-        mocker.patch("tqdm.tqdm", return_value=mock_pbar)
-
-        mock_lock = mocker.Mock()
-        items_fed = manager._feeder_stream(mock_lock)
+        items_fed = manager._feeder_stream(mocker.Mock())
 
         assert items_fed == 3
-        assert mock_job_q.put.call_count == 3
-        mock_log.info.assert_any_call("Target of 3 reached. Stopping feeder.")
+        assert manager.job_queue.put.call_count == 3  # type: ignore
+
+    def test_feeder_stream_failsafe_triggered(
+        self, mocker, manager_config_no_test, mock_sampler
+    ):
+        """Verify the stream loop breaks and logs an error if exhausted before target."""
+        # Provide a stream with 1 item, but the target is 3.
+        stream = [("train", {"text": "A"})]
+        manager = CipherManager(manager_config_no_test, stream, mock_sampler)
+
+        manager.feedback_queue = queue.Queue()  # type: ignore
+        manager.job_queue = mocker.Mock()
+        manager.job_queue.put.side_effect = lambda x: manager.feedback_queue.put(  # type: ignore
+            {"status": "success"}
+        )
+
+        mock_log = mocker.patch("cipher_generation.cipher_manager.log")
+        mocker.patch("tqdm.tqdm", return_value=mocker.MagicMock())
+
+        items_fed = manager._feeder_stream(mocker.Mock())
+
+        assert items_fed == 1
+        mock_log.error.assert_called_once_with(
+            "Stream exhausted with no in-flight tasks, but target not reached."
+        )
 
     def test_merge_stats_receives_stop_signal(
-        self, mocker, mock_mp_queue, manager_config
+        self, mocker, mock_mp_queue, manager_config, mock_sampler
     ):
         """Ensure _merge_stats breaks early if a STOP signal is received."""
-        _, _, _, mock_stats_q = mock_mp_queue
+        _, _, _, mock_stats_q, _ = mock_mp_queue
 
-        manager = CipherManager(manager_config, [])
+        manager = CipherManager(manager_config, [], mock_sampler)
         manager.num_workers = 3
 
         mock_valid_stats = mocker.Mock(spec=DatasetStatsAggregator)
@@ -268,25 +381,23 @@ class TestCipherManagerExecution:
 
 class TestCipherManagerPeakUpload:
     def test_manager_writes_and_queues_metadata(
-        self, mocker, mock_mp_queue, tmp_path, manager_config
+        self, mocker, mock_mp_queue, tmp_path, mock_config_sampler
     ):
-        _, _, mock_result_q, _ = mock_mp_queue
+        """Verify the metadata JSON is accurately generated and queued for upload."""
+        _, _, mock_result_q, _, _ = mock_mp_queue
+        mock_sampler, manager_config = mock_config_sampler
 
         mocker.patch("cipher_generation.cipher_manager.DriveUploader")
         mocker.patch("cipher_generation.cipher_manager.CipherProducer")
-
         mocker.patch("cipher_generation.cipher_manager.shutil.rmtree")
-
-        mock_pbar = MagicMock()
-        mock_pbar.__enter__.return_value = mock_pbar
-        mocker.patch("tqdm.tqdm", return_value=mock_pbar)
-
-        dummy_stream = [("train", {"text": "hello", "source_id": "1"})]
 
         manager = CipherManager(
             config=manager_config,
-            text_stream_source=dummy_stream,
+            text_stream_source=[],
+            sampler=mock_sampler,
         )
+
+        mocker.patch.object(manager, "_feeder_stream", return_value=1)
 
         expected_peak = 2501
         mocker.patch.object(
@@ -301,7 +412,6 @@ class TestCipherManagerPeakUpload:
         )
 
         manager.temp_dir = tmp_path / "temp_ciphers"
-
         manager.execute()
 
         put_calls = mock_result_q.put.call_args_list
@@ -321,11 +431,9 @@ class TestCipherManagerPeakUpload:
 
 
 class TestCipherManagerRouting:
-    """Tests focusing on the test-matrix bin routing and CipherTask payloads."""
-
-    def test_assign_test_redundancy_valid(self, manager_config):
+    def test_assign_test_redundancy_valid(self, manager_config, mock_sampler):
         """Ensure the manager assigns valid difficulties and increments the tracker."""
-        manager = CipherManager(manager_config, [])
+        manager = CipherManager(manager_config, [], mock_sampler)
 
         diff = manager._assign_test_redundancy(4000)
 
@@ -333,9 +441,9 @@ class TestCipherManagerRouting:
         assert diff in manager_config.dataset_config.test_matrix[4000]
         assert manager.test_tracker[4000][diff] == 1
 
-    def test_assign_test_redundancy_exhausted(self, manager_config):
+    def test_assign_test_redundancy_exhausted(self, manager_config, mock_sampler):
         """Ensure the manager returns None when all bins for a length are full."""
-        manager = CipherManager(manager_config, [])
+        manager = CipherManager(manager_config, [], mock_sampler)
         manager.test_samples_per_bin = 2
 
         for diff in manager.test_tracker[4000]:
@@ -343,10 +451,12 @@ class TestCipherManagerRouting:
 
         assert manager._assign_test_redundancy(4000) is None
 
-    def test_assign_test_redundancy_invalid_length(self, mocker, manager_config):
+    def test_assign_test_redundancy_invalid_length(
+        self, mocker, manager_config, mock_sampler
+    ):
         """Ensure invalid lengths are caught and logged."""
         mock_log = mocker.patch("cipher_generation.cipher_manager.log")
-        manager = CipherManager(manager_config, [])
+        manager = CipherManager(manager_config, [], mock_sampler)
 
         result = manager._assign_test_redundancy(99999)
 
@@ -355,24 +465,26 @@ class TestCipherManagerRouting:
             "Length 99999 not found in test matrix."
         )
 
-    def test_feeder_stream_payloads(self, mocker, mock_mp_queue, manager_config):
+    def test_feeder_stream_payloads(self, mocker, manager_config, mock_sampler):
         """Ensure the stream generates correct CipherTask dataclasses for each split."""
-        _, mock_job_q, _, _ = mock_mp_queue
-
         stream = [
             ("train", {"text": "A", "target_length": 4000}),
             ("val", {"text": "B", "target_length": 5000}),
             ("test", {"text": "C", "target_length": 6500}),
         ]
+        manager = CipherManager(manager_config, stream, mock_sampler)
 
-        manager = CipherManager(manager_config, stream)
-        mock_lock = mocker.Mock()
+        manager.feedback_queue = queue.Queue()  # type: ignore
+        manager.job_queue = mocker.Mock()
+        manager.job_queue.put.side_effect = lambda x: manager.feedback_queue.put(  # type: ignore
+            {"status": "success"}
+        )
+
         mocker.patch("tqdm.tqdm", return_value=mocker.MagicMock())
+        manager._feeder_stream(mocker.Mock())
 
-        manager._feeder_stream(mock_lock)
-
-        assert mock_job_q.put.call_count == 3
-        calls = mock_job_q.put.call_args_list
+        assert manager.job_queue.put.call_count == 3  # type: ignore
+        calls = manager.job_queue.put.call_args_list  # type: ignore
 
         train_task = calls[0][0][0]
         assert isinstance(train_task, CipherTask)
@@ -385,7 +497,6 @@ class TestCipherManagerRouting:
 
         test_task = calls[2][0][0]
         assert test_task.split == "test"
-
         assert isinstance(test_task.target_redundancy, int)
         assert (
             test_task.target_redundancy
@@ -393,21 +504,20 @@ class TestCipherManagerRouting:
         )
 
     def test_feeder_stream_skips_exhausted_test_bins(
-        self, mocker, mock_mp_queue, manager_config
+        self, mocker, manager_config, mock_sampler
     ):
-        """Ensure the stream skips pushing tasks to the queue if the test bin is full."""
-        _, mock_job_q, _, _ = mock_mp_queue
-
+        """Ensure the stream immediately requeues the task if the test bin is full."""
         stream = [("test", {"text": "D", "target_length": 8000})]
-
-        manager = CipherManager(manager_config, stream)
+        manager = CipherManager(manager_config, stream, mock_sampler)
 
         for diff in manager.test_tracker[8000]:
             manager.test_tracker[8000][diff] = manager.test_samples_per_bin
 
-        mock_lock = mocker.Mock()
+        manager.feedback_queue = queue.Queue()  # type: ignore
+        manager.job_queue = mocker.Mock()
+
         mocker.patch("tqdm.tqdm", return_value=mocker.MagicMock())
+        manager._feeder_stream(mocker.Mock())
 
-        manager._feeder_stream(mock_lock)
-
-        assert mock_job_q.put.call_count == 0
+        assert manager.job_queue.put.call_count == 0  # type: ignore
+        mock_sampler.requeue_target.assert_called_once_with("test", 8000)

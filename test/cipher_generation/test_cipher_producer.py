@@ -80,11 +80,13 @@ def producer(mocker, tmp_path):
     mock_input_queue = mocker.Mock()
     mock_output_queue = mocker.Mock()
     mock_stats_queue = mocker.Mock()
+    mock_feedback_queue = mocker.Mock()
 
     config = ProducerConfig(
         input_queue=mock_input_queue,
         output_queue=mock_output_queue,
         stats_queue=mock_stats_queue,
+        feedback_queue=mock_feedback_queue,
         batch_size=2,
         temp_dir=tmp_path / "temp_ciphers",
     )
@@ -138,10 +140,13 @@ class TestCipherProducerRunLoop:
         ]
 
         mocker.patch.object(producer, "generate_cipher", return_value=mock_cipher)
+        mocker.patch.object(producer, "_check_redundancy", return_value=True)
 
         producer.run()
 
         assert producer.output_queue.put.call_count == 1
+        assert producer.feedback_queue.put.call_count == 2
+        producer.feedback_queue.put.assert_called_with({"status": "success"})
 
         upload_task = producer.output_queue.put.call_args[0][0]
 
@@ -163,6 +168,7 @@ class TestCipherProducerRunLoop:
         """Verify that STOP forces a zip of an incomplete train batch."""
         producer.input_queue.get.side_effect = [valid_train_task, "STOP"]
         mocker.patch.object(producer, "generate_cipher", return_value=mock_cipher)
+        mocker.patch.object(producer, "_check_redundancy", return_value=True)
 
         producer.run()
 
@@ -188,10 +194,12 @@ class TestCipherProducerRunLoop:
             "STOP",
         ]
         mocker.patch.object(producer, "generate_cipher", return_value=mock_cipher)
+        mocker.patch.object(producer, "_check_redundancy", return_value=True)
 
         producer.run()
 
         assert producer.output_queue.put.call_count == 2
+        assert producer.feedback_queue.put.call_count == 2
 
         val_task = producer.output_queue.put.call_args_list[0][0][0]
         test_task = producer.output_queue.put.call_args_list[1][0][0]
@@ -225,8 +233,8 @@ class TestCipherProducerRunLoop:
         assert "Queue disconnect" in mock_log.error.call_args[0][0]
         assert producer.input_queue.get.call_count == 2
 
-    def test_run_skips_invalid_cipher(self, mocker, producer, valid_train_task):
-        """Verify the loop skips to the next item if cipher generation returns None."""
+    def test_run_sends_nack_on_invalid_cipher(self, mocker, producer, valid_train_task):
+        """Verify the loop sends a failure signal if cipher generation returns None."""
         producer.input_queue.get.side_effect = [valid_train_task, "STOP"]
         mocker.patch.object(producer, "generate_cipher", return_value=None)
 
@@ -234,6 +242,62 @@ class TestCipherProducerRunLoop:
 
         assert producer.input_queue.get.call_count == 2
         producer.output_queue.put.assert_not_called()
+        producer.feedback_queue.put.assert_called_once_with(
+            {
+                "status": "fail",
+                "split": "train",
+                "target_length": 8,
+                "target_redundancy": None,
+            }
+        )
+
+    def test_run_sends_nack_on_redundancy_failure(
+        self, mocker, producer, valid_test_task, mock_cipher
+    ):
+        """Verify the loop sends a failure signal if the cipher misses its target."""
+        producer.input_queue.get.side_effect = [valid_test_task, "STOP"]
+        mocker.patch.object(producer, "generate_cipher", return_value=mock_cipher)
+        mocker.patch.object(producer, "_check_redundancy", return_value=False)
+
+        producer.run()
+
+        assert producer.input_queue.get.call_count == 2
+        producer.output_queue.put.assert_not_called()
+        producer.feedback_queue.put.assert_called_once_with(
+            {
+                "status": "fail",
+                "split": "test",
+                "target_length": 8,
+                "target_redundancy": 20,
+            }
+        )
+
+
+class TestCipherProducerRedundancyCheck:
+    """Tests covering the redundancy validation logic."""
+
+    def test_check_redundancy_ignores_non_test_splits(
+        self, producer, valid_train_task, mock_cipher
+    ):
+        assert producer._check_redundancy(mock_cipher, valid_train_task) is True
+
+    def test_check_redundancy_validates_exact_match(
+        self, producer, valid_test_task, mock_cipher
+    ):
+        mock_cipher.redundancy = 20
+        assert producer._check_redundancy(mock_cipher, valid_test_task) is True
+
+    def test_check_redundancy_rejects_mismatch(
+        self, producer, valid_test_task, mock_cipher
+    ):
+        mock_cipher.redundancy = 19
+        assert producer._check_redundancy(mock_cipher, valid_test_task) is False
+
+    def test_check_redundancy_rejects_none(
+        self, producer, valid_test_task, mock_cipher
+    ):
+        mock_cipher.redundancy = None
+        assert producer._check_redundancy(mock_cipher, valid_test_task) is False
 
 
 @dataclass
