@@ -178,7 +178,15 @@ class SubstitutionCipher(ABC):
 
     @classmethod
     def from_json(cls, json_data: str) -> "SubstitutionCipher":
-        """Create a cipher object from a JSON string."""
+        """Create a cipher object from a JSON string.
+
+        Args:
+            json_data (str): The JSON string containing the cipher data.
+
+        Returns:
+            SubstitutionCipher: The cipher object.
+
+        """
         data = json.loads(json_data)
 
         text_obj: TextStream = {
@@ -269,7 +277,15 @@ class HomophonicCipher(SubstitutionCipher):
         return random.randint(lower_bound, upper_bound)
 
     def _clamp_redundancy(self, value: int) -> int:
-        """Clamps the requested redundancy to the physical limits."""
+        """Clamps the requested redundancy to the physical limits.
+
+        Args:
+            value (int): The requested redundancy level.
+
+        Returns:
+            int: The clamped redundancy level.
+
+        """
         return min(value, self.get_max_possible_redundancy())
 
     def generate_key(self) -> dict:
