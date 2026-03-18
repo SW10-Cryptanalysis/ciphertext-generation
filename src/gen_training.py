@@ -19,7 +19,7 @@ from utils.constants import (
 def get_text_stream(
     config: DatasetConfig,
     extractor: DatasetExtractor | None = None,
-) -> Iterator[tuple[str, TextStream]]:
+) -> tuple[CorpusSampler, Iterator[tuple[str, TextStream]]]:
     """Initialize dependencies and return the randomized text stream.
 
     Args:
@@ -38,7 +38,7 @@ def get_text_stream(
 
     sampler = CorpusSampler(config, genre_map)
 
-    return sampler.generate_stream(full_stream)
+    return sampler, sampler.generate_stream(full_stream)
 
 
 def get_folder_id(env_var: str) -> str:
@@ -82,7 +82,7 @@ if __name__ == "__main__":
         test_matrix={
             350: [5, 10, 15, 0],
             400: [5, 10, 15, 20, 0],
-            450: [5, 10, 15, 20, 25, 0],
+            450: [5, 10, 15, 20, 0],
             600: [5, 10, 15, 20, 25, 30, 0],
             800: [5, 10, 15, 20, 25, 30, 0],
             1000: [5, 10, 15, 20, 25, 30, 0],
@@ -95,7 +95,7 @@ if __name__ == "__main__":
         ciphers_per_bin=100,
     )
 
-    text_stream = get_text_stream(dataset_config)
+    sampler, text_stream = get_text_stream(dataset_config)
 
     config = CipherConfig(
         train_folder=folder_id_train,
@@ -109,6 +109,7 @@ if __name__ == "__main__":
     manager = CipherManager(
         config=config,
         text_stream_source=text_stream,
+        sampler=sampler,
     )
 
     try:
