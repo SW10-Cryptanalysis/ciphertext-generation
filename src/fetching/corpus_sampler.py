@@ -117,6 +117,43 @@ class CorpusSampler:
 
             yield from self._process_book(book)
 
+    def _adjust_quota(self, split: str, target_length: int, amount: int) -> None:
+        """Adjust internal tracking counts by the given amount.
+
+        Args:
+            split (str): The split to adjust.
+            target_length (int): The target length (used for test tracking).
+            amount (int): The amount to add or subtract.
+
+        """
+        if split == "test":
+            self.counts["test"][target_length] += amount
+            self.total_test_count += amount
+        else:
+            self.counts[split] += amount
+
+    def requeue_target(self, split: str, target_length: int) -> None:
+        """Handle a failed cipher by returning its quota to the sampler.
+
+        Args:
+            split (str): The split the cipher was generated in.
+            target_length (int): The length of the cipher.
+
+        """
+        self._adjust_quota(split, target_length, amount=-1)
+        if split == "test":
+            self.test_pool.append(target_length)
+
+    def _reserve_target(self, split: str, target_len: int) -> None:
+        """Reserve a target length for the current book.
+
+        Args:
+            split (str): The split the cipher was generated in.
+            target_len (int): The length of the cipher.
+
+        """
+        self._adjust_quota(split, target_len, amount=1)
+
     def _get_weighted_split(self) -> str | None:
         """Choose split based on remaining quota ratios."""
         rem = {}
@@ -145,6 +182,8 @@ class CorpusSampler:
             target_len = self._pop_target_len(split)
             if target_len is not None:
                 burst_targets.append({"split": split, "len": target_len})
+
+                self._reserve_target(split, target_len)
 
         return burst_targets
 
@@ -185,8 +224,7 @@ class CorpusSampler:
         while targets and total_req > text_len:
             removed = targets.pop()
             total_req -= removed["len"] + self.buffer
-            if removed["split"] == "test":
-                self.test_pool.append(removed["len"])
+            self.requeue_target(removed["split"], removed["len"])
 
         if targets and text_len > total_req * 1.5:
             random.shuffle(targets)
@@ -216,6 +254,8 @@ class CorpusSampler:
 
             if result:
                 yield self._record_and_format(target, result, meta)
+            else:
+                self.requeue_target(target["split"], target["len"])
 
             cursor += p_size
 
@@ -228,12 +268,6 @@ class CorpusSampler:
         """Update internal counts and format the final stream object."""
         chunk, bounded = result
         split, target_len = target["split"], target["len"]
-
-        if split == "test":
-            self.counts["test"][target_len] += 1
-            self.total_test_count += 1
-        else:
-            self.counts[split] += 1
 
         stream_data: TextStream = {
             "text": chunk,

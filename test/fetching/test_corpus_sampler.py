@@ -1,8 +1,8 @@
 import pytest
+from dataclasses import dataclass
 from cipher_generation.config import DatasetConfig
 from fetching.corpus_sampler import CorpusSampler, Metadata, Target
 from utils.text_sampling import Book
-from dataclasses import dataclass
 
 
 @pytest.fixture
@@ -170,7 +170,6 @@ class TestCorpusSamplerWeightedSplit:
         assert sampler._get_weighted_split() == "val"
 
     def test_returns_train_when_others_full(self, dummy_config, default_genre_map):
-        """Verify it routes to 'train' when val and test are at capacity."""
         sampler = CorpusSampler(dummy_config, default_genre_map)
         sampler.counts["train"] = 50
         sampler.counts["val"] = 10
@@ -179,7 +178,6 @@ class TestCorpusSamplerWeightedSplit:
         assert sampler._get_weighted_split() == "train"
 
     def test_returns_test_when_others_full(self, dummy_config, default_genre_map):
-        """Verify it routes to 'test' when train and val are at capacity."""
         sampler = CorpusSampler(dummy_config, default_genre_map)
         sampler.counts["train"] = 100
         sampler.counts["val"] = 10
@@ -211,6 +209,20 @@ class TestCorpusSamplerBurstTargets:
         targets = sampler._get_burst_targets()
 
         assert len(targets) == 0
+
+    def test_get_burst_targets_reserves_quotas_upfront(
+        self, mocker, dummy_config, default_genre_map
+    ):
+        """Verify that _get_burst_targets reserves quotas the moment they are planned."""
+        sampler = CorpusSampler(dummy_config, default_genre_map, max_chunks_per_book=1)
+        mocker.patch.object(sampler, "_get_weighted_split", return_value="test")
+        mocker.patch.object(sampler, "_pop_target_len", return_value=350)
+        mock_reserve = mocker.patch.object(sampler, "_reserve_target")
+
+        targets = sampler._get_burst_targets()
+
+        assert len(targets) == 1
+        mock_reserve.assert_called_once_with("test", 350)
 
     def test_pop_target_len_returns_test_pool_item(
         self, dummy_config, default_genre_map
@@ -246,11 +258,12 @@ class TestCorpusSamplerBurstTargets:
 
 
 class TestCorpusSamplerFitTargets:
-    def test_fit_targets_to_book_trims_and_returns_to_pool(
-        self, dummy_config, default_genre_map
+    def test_fit_targets_to_book_trims_and_requeues_removed_targets(
+        self, mocker, dummy_config, default_genre_map
     ):
+        """Verify targets that exceed the book length are removed and refunded."""
         sampler = CorpusSampler(dummy_config, default_genre_map, buffer_chars=100)
-        sampler.test_pool = []
+        mock_requeue = mocker.patch.object(sampler, "requeue_target")
 
         targets: list[Target] = [
             {"split": "train", "len": 1000},
@@ -261,15 +274,14 @@ class TestCorpusSamplerFitTargets:
 
         assert len(valid_targets) == 1
         assert valid_targets[0]["split"] == "train"
-        assert len(sampler.test_pool) == 1
-        assert sampler.test_pool[0] == 500
+        mock_requeue.assert_called_once_with("test", 500)
 
     def test_fit_targets_shuffles_when_book_is_large(
         self, mocker, dummy_config, default_genre_map
     ):
         sampler = CorpusSampler(dummy_config, default_genre_map, buffer_chars=10)
         mock_shuffle = mocker.patch("random.shuffle")
-        targets: list[Target]= [{"split": "train", "len": 100}]
+        targets: list[Target] = [{"split": "train", "len": 100}]
 
         sampler._fit_targets_to_book(targets, 1000)
 
@@ -316,14 +328,18 @@ class TestCorpusSamplerProcessBookBranches:
 
 
 class TestCorpusSamplerExtractAndFormat:
-    def test_extract_chunks_skips_none_results(
+    def test_extract_chunks_skips_none_results_and_requeues_all_splits(
         self, mocker, dummy_config, default_genre_map
     ):
+        """Verify that failed extractions trigger requeue_target for any split type."""
         sampler = CorpusSampler(dummy_config, default_genre_map)
+        mock_requeue = mocker.patch.object(sampler, "requeue_target")
+
         mocker.patch(
             "fetching.corpus_sampler.extract_specific_chunk", return_value=None
         )
         mock_record = mocker.patch.object(sampler, "_record_and_format")
+
         book = Book(
             id="1",
             text="dummy",
@@ -331,16 +347,25 @@ class TestCorpusSamplerExtractAndFormat:
             source_type="",
             fallback_genres=[],
         )
-        targets: list[Target] = [{"split": "train", "len": 100}]
+
+        targets: list[Target] = [
+            {"split": "train", "len": 100},
+            {"split": "test", "len": 350},
+        ]
 
         results = list(sampler._extract_chunks_from_partitions("dummy", targets, book))
 
         assert len(results) == 0
         mock_record.assert_not_called()
 
-    def test_record_and_format_updates_counts_and_structures_data(
+        assert mock_requeue.call_count == 2
+        mock_requeue.assert_any_call("train", 100)
+        mock_requeue.assert_any_call("test", 350)
+
+    def test_record_and_format_structures_data_without_incrementing(
         self, dummy_config, default_genre_map
     ):
+        """Verify _record_and_format purely structures the data and does not alter tracking state."""
         sampler = CorpusSampler(dummy_config, default_genre_map)
         target: Target = {"split": "test", "len": 350}
         result = ("clean_text", "clean_text_bounds")
@@ -354,30 +379,40 @@ class TestCorpusSamplerExtractAndFormat:
 
         assert split == "test"
         assert stream_data["text"] == "clean_text"
+        assert stream_data["text_with_boundaries"] == "clean_text_bounds"
         assert stream_data["target_length"] == 350
-        assert sampler.total_test_count == 1
-        assert sampler.counts["test"][350] == 1
+        assert stream_data["genres"] == ["Fiction"]
 
-    def test_record_and_format_updates_train_val_counts(
-        self, dummy_config, default_genre_map
-    ):
-        """Verify that the 'else' block correctly updates counts for non-test splits."""
+        # Ensure state remained fully pristine
+        assert sampler.total_test_count == 0
+        assert sampler.counts["test"][350] == 0
+
+
+class TestCorpusSamplerStateTracking:
+    def test_adjust_quota_train_split(self, dummy_config, default_genre_map):
         sampler = CorpusSampler(dummy_config, default_genre_map)
-        target: Target = {"split": "train", "len": 200}
-        result = ("train_text", "train_text_bounds")
-        meta: Metadata = {
-            "source_id": "2",
-            "source_name": "Train Title",
-            "genres": ["Science Fiction"],
-        }
-
-        assert sampler.counts["train"] == 0
-
-        split, stream_data = sampler._record_and_format(target, result, meta)
-
-        assert split == "train"
-        assert stream_data["text"] == "train_text"
-
+        sampler._adjust_quota("train", 1000, 1)
         assert sampler.counts["train"] == 1
 
-        assert sampler.total_test_count == 0
+    def test_adjust_quota_test_split(self, dummy_config, default_genre_map):
+        sampler = CorpusSampler(dummy_config, default_genre_map)
+        sampler._adjust_quota("test", 350, 2)
+        assert sampler.counts["test"][350] == 2
+        assert sampler.total_test_count == 2
+
+    def test_reserve_target(self, mocker, dummy_config, default_genre_map):
+        sampler = CorpusSampler(dummy_config, default_genre_map)
+        mock_adjust = mocker.patch.object(sampler, "_adjust_quota")
+
+        sampler._reserve_target("val", 200)
+        mock_adjust.assert_called_once_with("val", 200, amount=1)
+
+    def test_requeue_target(self, mocker, dummy_config, default_genre_map):
+        sampler = CorpusSampler(dummy_config, default_genre_map)
+        mock_adjust = mocker.patch.object(sampler, "_adjust_quota")
+        sampler.test_pool = []
+
+        sampler.requeue_target("test", 400)
+
+        mock_adjust.assert_called_once_with("test", 400, amount=-1)
+        assert sampler.test_pool == [400]
