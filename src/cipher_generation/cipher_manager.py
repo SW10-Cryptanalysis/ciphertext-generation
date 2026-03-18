@@ -1,7 +1,7 @@
 import multiprocessing as mp
 from utils.logging import get_logger_tqdm
 import os
-from typing import Iterable, Any, Literal
+from typing import Iterable, Any, Literal, Iterator
 from multiprocessing.queues import Queue
 import json
 from pathlib import Path
@@ -9,6 +9,7 @@ import random
 import shutil
 from utils.constants import PROJECT_ROOT
 
+from fetching.corpus_sampler import CorpusSampler, TextStream
 from cipher_generation.drive_uploader import DriveUploader, DriveUploaderConfig
 from cipher_generation.cipher_producer import CipherProducer, ProducerConfig
 from dataset_stats import DatasetStatsAggregator
@@ -40,15 +41,18 @@ class CipherManager:
         self,
         config: CipherConfig,
         text_stream_source: Iterable,
+        sampler: CorpusSampler,
     ) -> None:
         """Initialize the CipherManager.
 
         Args:
             config (CipherConfig): The cipher generation configuration.
             text_stream_source (Iterable): The iterable source of text chunks.
+            sampler (CorpusSampler): The corpus sampler to use for the stream.
 
         """
         self.stream = text_stream_source
+        self.sampler = sampler
 
         test_bins = sum(
             len(diffs) for diffs in config.dataset_config.test_matrix.values()
@@ -76,9 +80,10 @@ class CipherManager:
 
         self.num_workers = config.num_workers or max(1, (os.cpu_count() or 4) - 2)
 
-        self.job_queue: Queue[CipherTask | Literal["STOP"]] = mp.Queue()  # type: ignore
-        self.result_queue: Queue[UploadTask | Literal["STOP"]] = mp.Queue()  # type: ignore
-        self.stats_queue: Queue[DatasetStatsAggregator | Literal["STOP"]] = mp.Queue()  # type: ignore
+        self.job_queue: Queue[CipherTask | Literal["STOP"]] = mp.Queue()
+        self.result_queue: Queue[UploadTask | Literal["STOP"]] = mp.Queue()
+        self.stats_queue: Queue[DatasetStatsAggregator | Literal["STOP"]] = mp.Queue()
+        self.feedback_queue: Queue[dict] = mp.Queue()
         self.batch_size = config.batch_size
 
         self.master_stats = DatasetStatsAggregator()
@@ -114,6 +119,7 @@ class CipherManager:
                     stats_queue=self.stats_queue,
                     batch_size=self.batch_size,
                     temp_dir=self.temp_dir,
+                    feedback_queue=self.feedback_queue,
                 ),
                 name=f"Worker-{i + 1}",
             )
@@ -193,21 +199,94 @@ class CipherManager:
         )
         self.result_queue.put(task)
 
+    def _process_feedback(self) -> tuple[int, int]:
+        """Process the feedback queue and return the number of successes and failures.
+
+        Uses early continues to avoid deep indentation levels.
+        """
+        import queue
+
+        successes = 0
+        failures = 0
+
+        while True:
+            try:
+                feedback = self.feedback_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            if feedback["status"] == "success":
+                successes += 1
+                continue
+
+            failures += 1
+            split = feedback["split"]
+            length = feedback["target_length"]
+            red = feedback["target_redundancy"]
+
+            if split == "test" and red is not None:
+                self.test_tracker[length][red] -= 1
+
+            self.sampler.requeue_target(split, length)
+
+        return successes, failures
+
+    def _get_task(self, split: str, text_data: TextStream) -> CipherTask | None:
+        """Get the next task from the stream iterator.
+
+        Returns None if the stream is exhausted.
+        """
+        target_redundancy = None
+
+        if split == "test":
+            length = text_data.get("target_length", 0)
+            target_redundancy = self._assign_test_redundancy(length)
+
+            if target_redundancy is None:
+                self.sampler.requeue_target(split, length)
+                return None
+
+        return CipherTask(
+            split=split,
+            text_data=text_data,
+            target_redundancy=target_redundancy,
+        )
+
+    def _feed_new_tasks(self, stream_iter: Iterator, capacity: int) -> int:
+        """Feed new tasks up to the requested capacity. Returns number of tasks queued.
+
+        Uses guard clauses to skip invalid test targets without deep nesting.
+        """
+        newly_queued = 0
+
+        while newly_queued < capacity:
+            try:
+                split, text_data = next(stream_iter)
+                task = self._get_task(split, text_data)
+                if task is None:
+                    continue
+
+            except StopIteration:
+                break
+
+            self.job_queue.put(task)
+            newly_queued += 1
+
+        return newly_queued
+
     def _feeder_stream(self, tqdm_lock: Any) -> int:
         """Feed the ciphers to the workers using the job queue.
 
-        Args:
-            tqdm_lock (Any): The multiprocessing lock to use for tqdm.
-
-        Returns:
-            int: The number of ciphers fed to the workers.
-
+        Orchestrates the feedback processing and task feeding loops.
         """
         from tqdm import tqdm
 
         tqdm.set_lock(tqdm_lock)
+        success_count = 0
+        in_flight = 0
+        max_in_flight = self.num_workers * 5
 
-        count_fed = 0
+        stream_iter = iter(self.stream)
 
         with tqdm(
             total=self.total_count,
@@ -215,30 +294,29 @@ class CipherManager:
             position=0,
             leave=True,
         ) as pbar:
-            for count_fed, (split, text_data) in enumerate(self.stream, start=1):
-                target_redundancy = None
-                if split == "test":
-                    length = text_data.get("target_length", 0)
-                    target_redundancy = self._assign_test_redundancy(length)
-                    if target_redundancy is None:
-                        continue
+            while success_count < self.total_count:
+                successes, failures = self._process_feedback()
 
-                task = CipherTask(
-                    split=split,
-                    text_data=text_data,
-                    target_redundancy=target_redundancy,
-                )
-                self.job_queue.put(task)
-                pbar.update(1)
+                if successes > 0:
+                    success_count += successes
+                    pbar.update(successes)
 
-                if count_fed % self._logging_interval == 0:
-                    log.debug(f"Crossed {count_fed} texts milestone...")
+                in_flight -= successes + failures
 
-                if count_fed >= self.total_count:
-                    log.info(f"Target of {self.total_count} reached. Stopping feeder.")
+                remaining_target = self.total_count - (success_count + in_flight)
+                available_capacity = min(max_in_flight - in_flight, remaining_target)
+
+                if available_capacity > 0:
+                    in_flight += self._feed_new_tasks(stream_iter, available_capacity)
+
+                if in_flight == 0 and success_count < self.total_count:
+                    log.error(
+                        "Stream exhausted with no in-flight tasks, but target not "
+                        "reached.",
+                    )
                     break
 
-        return count_fed
+        return success_count
 
     def _assign_test_redundancy(self, length: int) -> int | None:
         """Find an available redundancy bin for a given test length.
