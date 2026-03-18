@@ -242,11 +242,37 @@ class HomophonicCipher(SubstitutionCipher):
 
         self.redundancy = self._clamp_redundancy(self.redundancy)
 
-    def _clamp_redundancy(self, value: int) -> int:
-        """Clamps the redundancy to the physical limits of the current plaintext."""
+    def get_max_possible_redundancy(self) -> int:
+        """Calculate the maximum redundancy a plaintext can support.
+
+        Redundancy cannot exceed (Length / Unique Letters).
+
+        Returns:
+            int: Maximum possible redundancy.
+
+        """
         unique_letters = len(set(self.plaintext))
-        max_redundancy = len(self.plaintext) // max(1, unique_letters)
-        return min(value, max_redundancy)
+        if unique_letters == 0:
+            return 1
+        return len(self.plaintext) // unique_letters
+
+    def generate_redundancy(self) -> int:
+        """Sample a redundancy level that is physically possible for the text.
+
+        Returns:
+            int: Redundancy level bounded by MIN_DIFFICULTY and MAX_DIFFICULTY.
+
+        """
+        max_physically_possible = self.get_max_possible_redundancy()
+        upper_bound = min(MAX_DIFFICULTY, max_physically_possible)
+
+        lower_bound = min(MIN_DIFFICULTY, upper_bound)
+
+        return random.randint(lower_bound, upper_bound)
+
+    def _clamp_redundancy(self, value: int) -> int:
+        """Clamps the requested redundancy to the physical limits."""
+        return min(value, self.get_max_possible_redundancy())
 
     def generate_key(self) -> dict:
         """Generate a homophonic substitution cipher key based on a redundancy level.
@@ -305,15 +331,6 @@ class HomophonicCipher(SubstitutionCipher):
 
         self._apply_recurrence_and_remap_key()
         return self.ciphertext
-
-    def generate_redundancy(self) -> int:
-        """Generate a random redundancy level.
-
-        Returns:
-            int: Redundancy level bounded by MIN_DIFFICULTY and MAX_DIFFICULTY.
-
-        """
-        return random.randint(MIN_DIFFICULTY, MAX_DIFFICULTY)
 
 
 class MonoalphabeticCipher(SubstitutionCipher):
