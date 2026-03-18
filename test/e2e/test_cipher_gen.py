@@ -87,11 +87,7 @@ def mock_for_end_to_end_pipeline_sync(mocker, mock_pbar, mock_cipher):
 def test_end_to_end_pipeline_sync(
     mocker, tmp_path, tiny_config, mock_for_end_to_end_pipeline_sync
 ):
-    """Verify the pipeline logic by executing methods sequentially in one process.
-
-    This approach bypasses multiprocessing 'spawn' isolation and pickling errors
-    while ensuring the entire data flow from feeder to uploader is validated.
-    """
+    """Verify the pipeline logic by executing methods sequentially in one process."""
     original_join = os.path.join
     mock_upload = mock_for_end_to_end_pipeline_sync
 
@@ -115,7 +111,6 @@ def test_end_to_end_pipeline_sync(
             "genres": ["Fiction"],
         }
 
-    # Simulate the Sampler extracting chunks
     tiny_stream = [("train", create_mock_text_stream("First text"))]
     mock_sampler = mocker.Mock(spec=CorpusSampler)
 
@@ -125,7 +120,6 @@ def test_end_to_end_pipeline_sync(
         sampler=mock_sampler,
     )
 
-    # Mock the feedback process to simulate an immediate success so it doesn't hang
     mocker.patch.object(manager, "_process_feedback", return_value=(1, 0))
 
     manager._feeder_stream(mocker.Mock())
@@ -162,14 +156,7 @@ def test_end_to_end_pipeline_sync(
 
 @pytest.mark.integration
 def test_requeue_integration_real_stream(mocker, tmp_path, default_genre_map):
-    """True multiprocess integration test enforcing the requeue math.
-
-    Creates a scenario where the first text mathematically cannot support the
-    requested redundancy, forcing the worker to NACK, the manager to refund,
-    and the sampler to pull a second text that can succeed.
-    """
-
-    # 1. Setup a strict config that demands 1 cipher of len 350 at Redundancy 25
+    """True multiprocess integration test enforcing the requeue math on test splits."""
     integration_config = CipherConfig(
         train_folder="train_folder",
         val_folder="val_folder",
@@ -180,23 +167,22 @@ def test_requeue_integration_real_stream(mocker, tmp_path, default_genre_map):
         dataset_config=DatasetConfig(
             training_num=0,
             validation_num=0,
-            test_matrix={350: [25]},  # Redundancy 25!
+            test_matrix={350: [25]},
             ciphers_per_bin=1,
         ),
     )
 
-    # 2. Craft an intelligent local stream to avoid flaky HuggingFace network calls
     def intelligent_mock_stream():
-        # First Book: Normal text (26 unique chars). Max redundancy = 350/26 = 13.
-        # This will fail the Target = 25 check and trigger a Requeue.
+        # First Book: 26 unique chars. 350 chunk max redundancy = 350//26 = 13.
+        # Target 25 will cap at 13, fail strict validation, and trigger a Requeue.
         yield {
             "id": "1",
-            "text": "the quick brown fox jumps over the lazy dog " * 20,
+            "text": "abcdefghijklmnopqrstuvwxyz" * 20,
             "metadata": {"title": "Normal Book"},
         }
-        # Second Book: Heavily skewed text (4 unique chars). Max redundancy = 350/4 = 87.
-        # This will easily hit Target = 25 and succeed.
-        yield {"id": "2", "text": "abcd " * 100, "metadata": {"title": "Skewed Book"}}
+        # Second Book: 4 unique chars. 350 chunk max redundancy = 350//4 = 87.
+        # Will easily hit 25 and succeed.
+        yield {"id": "2", "text": "abcd" * 125, "metadata": {"title": "Skewed Book"}}
 
     sampler = CorpusSampler(integration_config.dataset_config, default_genre_map)
     text_stream = sampler.generate_stream(intelligent_mock_stream())
@@ -208,19 +194,61 @@ def test_requeue_integration_real_stream(mocker, tmp_path, default_genre_map):
     )
     manager.temp_dir = tmp_path / "temp_ciphers"
 
-    # 3. Spy on the requeue_target method to prove it gets called
     spy_requeue = mocker.spy(sampler, "requeue_target")
-
-    # 4. Disable Drive uploads so the integration test doesn't write to your Google Drive
     mocker.patch("cipher_generation.drive_uploader.DriveUploader.start")
     mocker.patch("cipher_generation.drive_uploader.DriveUploader.join")
 
-    # 5. Execute the true multiprocess pipeline
     manager.execute()
 
-    # 6. Verify the self-healing pipeline worked exactly as engineered
+    # Verify the failure was caught and a replacement text was drawn
     assert spy_requeue.call_count == 1
     spy_requeue.assert_called_with("test", 350)
-
-    # Verify the stats show 1 final successfully generated cipher
     assert manager.master_stats.splits["test"].total_count == 1  # type: ignore
+
+
+@pytest.mark.integration
+def test_train_continuous_redundancy_integration(mocker, tmp_path, default_genre_map):
+    """Verify that train tasks accept clamped random redundancy without requeuing."""
+    integration_config = CipherConfig(
+        train_folder="train_folder",
+        val_folder="val_folder",
+        test_folder="test_folder",
+        metadata_folder="metadata_folder",
+        batch_size=1,
+        num_workers=1,
+        dataset_config=DatasetConfig(
+            training_num=1,
+            validation_num=0,
+            test_matrix={},
+            ciphers_per_bin=0,
+        ),
+    )
+
+    def train_mock_stream():
+        # Yield a normal string that forces the cipher to clamp its random choice.
+        # Added a space and multiplied by 500 so extract_specific_chunk has valid word boundaries and length!
+        yield {
+            "id": "1",
+            "text": "abcdefghijklmnopqrstuvwxyz " * 500,
+            "metadata": {"title": "Normal Book"},
+        }
+
+    sampler = CorpusSampler(integration_config.dataset_config, default_genre_map)
+    text_stream = sampler.generate_stream(train_mock_stream())
+
+    manager = CipherManager(
+        config=integration_config,
+        text_stream_source=text_stream,
+        sampler=sampler,
+    )
+    manager.temp_dir = tmp_path / "temp_ciphers"
+
+    spy_requeue = mocker.spy(sampler, "requeue_target")
+    mocker.patch("cipher_generation.drive_uploader.DriveUploader.start")
+    mocker.patch("cipher_generation.drive_uploader.DriveUploader.join")
+
+    manager.execute()
+
+    # Verify the train cipher succeeded purely on the first try despite clamping
+    assert spy_requeue.call_count == 0
+    assert manager.master_stats.splits["train"].total_count == 1  # type: ignore

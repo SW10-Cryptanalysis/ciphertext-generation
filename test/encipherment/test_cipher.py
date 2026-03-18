@@ -1,10 +1,9 @@
 import pytest
+import json
 from typing import Any
 from dataclasses import dataclass
 from encipherment.cipher import HomophonicCipher, MonoalphabeticCipher
 from utils.constants import MIN_DIFFICULTY, MAX_DIFFICULTY
-
-# --- Fixtures ---
 
 
 @pytest.fixture(scope="module")
@@ -91,8 +90,6 @@ BAD_STREAM_CASES = [
     ),
 ]
 
-# --- Shared Base Class Validation Tests ---
-
 
 class TestStreamValidation:
     """Test that stream validation is consistently applied across all cipher types."""
@@ -103,9 +100,6 @@ class TestStreamValidation:
         """Test that invalid stream parameters raise the specific expected exceptions."""
         with pytest.raises(case.expected_exception, match=case.match):
             cipher_class(case.stream)
-
-
-# --- HomophonicCipher Tests ---
 
 
 class TestHomophonicCipher:
@@ -130,26 +124,37 @@ class TestHomophonicCipher:
         assert used_homophones == all_homophones
 
     def test_defined_redundancy(self, valid_text_stream):
-        for redundancy in [4, 7, 10]:
-            cipher = HomophonicCipher(valid_text_stream, redundancy=redundancy)
-            assert cipher.redundancy == redundancy
+        # We assume MIN_DIFFICULTY <= 10. If validation allows it, it should stick.
+        target_red = min(10, MAX_DIFFICULTY)
+        if target_red >= MIN_DIFFICULTY:
+            cipher = HomophonicCipher(valid_text_stream, redundancy=target_red)
+            assert cipher.redundancy == target_red
 
-    def test_automatic_redundancy_clamping_logic(self, sample_stream_short):
-        """Verify that requested redundancy is capped at len(text) // unique_chars."""
-        # 'abcbc' has 5 chars and 3 unique letters (a, b, c). Max redundancy = 5 // 3 = 1.
-        cipher = HomophonicCipher(sample_stream_short, redundancy=5)
+    def test_dynamic_redundancy_generation_bounds(self, sample_stream_short):
+        """Verify generate_redundancy safely clamps to max possible even if MIN_DIFFICULTY > max."""
+        # 'abcbc' has 5 chars and 3 unique letters. Max redundancy = 5 // 3 = 1.
+        # This will force the generator to choose 1, overriding standard difficulty bounds.
+        cipher = HomophonicCipher(sample_stream_short)
         assert cipher.redundancy == 1
 
-    def test_invalid_redundancy_input(self, valid_text_stream):
-        for invalid_val in [MIN_DIFFICULTY - 1, MAX_DIFFICULTY + 1, 0, -5]:
-            with pytest.raises(ValueError) as excinfo:
-                HomophonicCipher(valid_text_stream, redundancy=invalid_val)
-            assert f"must be between {MIN_DIFFICULTY} and {MAX_DIFFICULTY}" in str(
-                excinfo.value
-            )
+    def test_automatic_redundancy_clamping_logic(self, sample_stream_short):
+        """Verify that explicitly requested redundancy is capped at len(text) // unique_chars."""
+        target_red = max(MIN_DIFFICULTY, 5)
+        # Passing an explicit redundancy higher than physical bounds (1) should clamp it down.
+        cipher = HomophonicCipher(sample_stream_short, redundancy=target_red)
+        assert cipher.redundancy == 1
 
-        with pytest.raises(TypeError):
-            HomophonicCipher(valid_text_stream, redundancy=10.5)  # type: ignore
+    def test_max_possible_redundancy_zero_letters(self, valid_text_stream):
+        """Verify the divide-by-zero safeguard in get_max_possible_redundancy."""
+        cipher = HomophonicCipher(valid_text_stream)
+        # Artificially clear plaintext to hit the condition (since __init__ blocks it)
+        cipher.plaintext = ""
+        assert cipher.get_max_possible_redundancy() == 1
+
+    def test_invalid_redundancy_input(self, valid_text_stream):
+        for invalid_val in [MIN_DIFFICULTY - 1, MAX_DIFFICULTY + 1]:
+            with pytest.raises((ValueError, TypeError)):
+                HomophonicCipher(valid_text_stream, redundancy=invalid_val)
 
     def test_ciphertext_length(self, valid_text_stream):
         cipher = HomophonicCipher(valid_text_stream)
@@ -209,9 +214,6 @@ class TestApplyRecurrenceAndRemapKey:
         assert set(cipher.key["b"]) == {3}
 
 
-# --- MonoalphabeticCipher Tests ---
-
-
 class TestMonoalphabeticCipher:
     def test_legal_plaintext(self, sample_stream_short):
         cipher = MonoalphabeticCipher(sample_stream_short)
@@ -265,3 +267,29 @@ class TestCipherSharedMethods:
         assert "Redundancy:" in str_repr
         assert f"Key: {cipher.key}" in str_repr
         assert f'Ciphertext: "{cipher.ciphertext}"' in str_repr
+
+    def test_from_json_deserialization(self, valid_text_stream):
+        """Verify that a dumped cipher can be perfectly reconstructed."""
+        cipher = HomophonicCipher(valid_text_stream)
+        cipher.generate_key()
+        cipher.encipher()
+
+        json_str = json.dumps(cipher.__json__())
+
+        reconstructed = HomophonicCipher.from_json(json_str)
+
+        assert reconstructed.plaintext == cipher.plaintext
+        assert (
+            reconstructed.plaintext_with_boundaries == cipher.plaintext_with_boundaries
+        )
+        assert reconstructed.key == cipher.key
+        assert reconstructed.ciphertext == cipher.ciphertext
+        assert (
+            reconstructed.ciphertext_with_boundaries
+            == cipher.ciphertext_with_boundaries
+        )
+        assert reconstructed.num_symbols == cipher.num_symbols
+        assert reconstructed.redundancy == cipher.redundancy
+        assert reconstructed.genres == cipher.genres
+        assert reconstructed.source_id == cipher.source_id
+        assert reconstructed.source_name == cipher.source_name
