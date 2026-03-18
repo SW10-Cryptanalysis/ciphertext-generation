@@ -102,7 +102,7 @@ if __name__ == "__main__":
         val_folder=folder_id_val,
         test_folder=folder_id_test,
         metadata_folder=folder_id_metadata,
-        batch_size=10,
+        batch_size=10_000,
         dataset_config=dataset_config,
     )
 
