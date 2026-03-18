@@ -28,6 +28,13 @@ markers = [
 	"integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
 ]
 
+[tool.coverage.run]
+omit = [
+    "src/gen_training.py", 
+    "src/preprocess.py",
+    "src/map_genres.py",
+]
+
 [tool.coverage.report]
 exclude_also = [
 	"if 0:",
