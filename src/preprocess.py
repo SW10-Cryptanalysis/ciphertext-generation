@@ -92,7 +92,7 @@ features = Features(
         "plaintext": Value("string"),
         "ciphertext_with_boundaries": Value("string"),
         "plaintext_with_boundaries": Value("string"),
-        "difficulty": Value("int32"),
+        "redundancy": Value("int32"),
     },
 )
 
