@@ -177,27 +177,25 @@ class SubstitutionCipher(ABC):
         pass
 
     @classmethod
-    def from_json(cls, json_data: str) -> "SubstitutionCipher":  # pragma: no cover
-        """Create a cipher object from a JSON string.
-
-        Args:
-            json_data (str): A JSON formatted string representing a cipher.
-
-        Returns:
-            SubstitutionCipher: An instantiated cipher object.
-
-        """
+    def from_json(cls, json_data: str) -> "SubstitutionCipher":
+        """Create a cipher object from a JSON string."""
         data = json.loads(json_data)
-        cipher = cls(data["plaintext"])
-        cipher.plaintext_with_boundaries = data["plaintext_with_boundaries"]
+
+        text_obj: TextStream = {
+            "text": data["plaintext"],
+            "text_with_boundaries": data["plaintext_with_boundaries"],
+            "length": data.get("length", len(data["plaintext"])),
+            "target_length": data.get("length", len(data["plaintext"])),
+            "genres": data["genres"],
+            "source_id": data["source_id"],
+            "source_name": data["source_name"],
+        }
+
+        cipher = cls(text_obj, redundancy=data["redundancy"])
         cipher.key = data["key"]
         cipher.ciphertext = data["ciphertext"]
         cipher.ciphertext_with_boundaries = data["ciphertext_with_boundaries"]
         cipher.num_symbols = data["num_symbols"]
-        cipher.redundancy = data["redundancy"]
-        cipher.genres = data["genres"]
-        cipher.source_id = data["source_id"]
-        cipher.source_name = data["source_name"]
 
         return cipher
 
