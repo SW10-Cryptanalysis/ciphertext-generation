@@ -37,6 +37,7 @@ class ProducerConfig:
     input_queue: MPQueue[CipherTask | Literal["STOP"]]
     output_queue: MPQueue[UploadTask | Literal["STOP"]]
     stats_queue: MPQueue[DatasetStatsAggregator | Literal["STOP"]]
+    feedback_queue: MPQueue[dict]
     temp_dir: Path
 
 
@@ -71,6 +72,7 @@ class CipherProducer(mp.Process):
         self.input_queue = config.input_queue
         self.output_queue = config.output_queue
         self.stats_queue = config.stats_queue
+        self.feedback_queue = config.feedback_queue
 
         self.batch_size = config.batch_size
         self.temp_dir = config.temp_dir
@@ -105,6 +107,25 @@ class CipherProducer(mp.Process):
                 cipher = self.generate_cipher(item.text_data, item.target_redundancy)
 
                 if cipher is None:
+                    self.feedback_queue.put(
+                        {
+                            "status": "fail",
+                            "split": item.split,
+                            "target_length": item.text_data.get("target_length", 0),
+                            "target_redundancy": item.target_redundancy,
+                        },
+                    )
+                    continue
+
+                if not self._check_redundancy(cipher, item):
+                    self.feedback_queue.put(
+                        {
+                            "status": "fail",
+                            "split": item.split,
+                            "target_length": item.text_data.get("target_length", 0),
+                            "target_redundancy": item.target_redundancy,
+                        },
+                    )
                     continue
 
                 stats.record(
@@ -117,12 +138,33 @@ class CipherProducer(mp.Process):
 
                 self._write_and_batch_cipher(item.split, cipher, batch_info)
 
+                self.feedback_queue.put({"status": "success"})
+
             except queue.Empty:
                 continue
             except Exception as e:
                 log.error(f"Producer {process_name} failed: {e}")
 
         log.info(f"{process_name} finished generation.")
+
+    def _check_redundancy(self, cipher: SubstitutionCipher, item: CipherTask) -> bool:
+        """Check if the cipher has the correct redundancy.
+
+        Args:
+            cipher (SubstitutionCipher): The cipher to check.
+            item (CipherTask): The cipher task to check.
+
+        Returns:
+            bool: True if the cipher has the correct redundancy, False otherwise.
+
+        """
+        if item.split != "test":
+            return True
+
+        return (
+            cipher.redundancy is not None
+            and cipher.redundancy == item.target_redundancy
+        )
 
     def _write_and_batch_cipher(
         self,
