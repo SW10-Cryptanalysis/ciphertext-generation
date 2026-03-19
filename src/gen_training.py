@@ -73,26 +73,6 @@ if __name__ == "__main__":
     dataset_config = DatasetConfig(
         training_num=NUM_TRAINING_CIPHERS,
         validation_num=NUM_VALIDATION_CIPHERS,
-        foundation_pct=0.10,
-        foundation_range=(350, 1000),
-        transition_pct=0.20,
-        transition_range=(1000, 4000),
-        frontier_pct=0.70,
-        frontier_range=(4000, 10000),
-        test_matrix={
-            350: [5, 10, 15, 0],
-            400: [5, 10, 15, 20, 0],
-            450: [5, 10, 15, 20, 0],
-            600: [5, 10, 15, 20, 25, 30, 0],
-            800: [5, 10, 15, 20, 25, 30, 0],
-            1000: [5, 10, 15, 20, 25, 30, 0],
-            2000: [5, 10, 15, 20, 25, 30, 50, 0],
-            4000: [5, 10, 15, 20, 25, 30, 50, 100, 0],
-            6000: [5, 10, 15, 20, 25, 30, 50, 100, 150, 0],
-            8000: [5, 10, 15, 20, 25, 30, 50, 100, 200, 300, 0],
-            10000: [5, 10, 15, 20, 25, 30, 50, 100, 200, 300, 0],
-        },
-        ciphers_per_bin=100,
     )
 
     sampler, text_stream = get_text_stream(dataset_config)
