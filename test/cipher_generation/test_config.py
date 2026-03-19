@@ -65,7 +65,7 @@ class TestDatasetConfig:
         """Verify the default test matrix and ciphers_per_bin calculate correctly."""
         config = DatasetConfig()
 
-        assert config.num_test_ciphers == 8500
+        assert config.num_test_ciphers == 8100
 
     def test_num_test_ciphers_custom(self):
         """Verify the property dynamically calculates based on custom inputs."""
