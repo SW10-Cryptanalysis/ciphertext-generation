@@ -369,7 +369,7 @@ class MonoalphabeticCipher(SubstitutionCipher):
             text_obj (TextStream): Text object containing the plaintext and metadata.
 
         """
-        super().__init__(text_obj, redundancy=1)
+        super().__init__(text_obj, redundancy=0)
         self.key = self.generate_key()
         self.encipher()
 
