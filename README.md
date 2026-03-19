@@ -15,7 +15,7 @@ This project is a comprehensive pipeline for generating synthetic ciphertexts fr
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.12+
 - [uv](https://github.com/astral-sh/uv) (for environment and dependency management)
 - Google Cloud SDK (for Google Drive authentication)
 
