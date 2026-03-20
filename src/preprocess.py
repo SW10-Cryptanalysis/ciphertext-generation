@@ -8,6 +8,11 @@ from typing import Any, Generator
 from pathlib import Path
 from dataclasses import dataclass
 
+
+# Force Hugging Face cache to a visible directory to bypass Slurm/HPC issues
+os.environ["HF_DATASETS_CACHE"] = "/ceph/project/SW10-CausalLM/hf_cache"
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
