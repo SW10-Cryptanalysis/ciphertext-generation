@@ -235,11 +235,15 @@ def _json_generator(path: Path) -> Generator[dict[str, Any], None, None]:
 
         # Handle ZIP files directly in memory
         elif file_path.suffix == ".zip":
+            zip_read = True
             with zipfile.ZipFile(file_path, "r") as z:
                 for filename in z.namelist():
-                    if filename.endswith(".json"):
+                    if filename.endswith(".jsonl"):
                         with z.open(filename) as f:
-                            yield json.loads(f.read().decode("utf-8"))
+                            for line in f:
+                                decoded_line = line.decode("utf-8").strip()
+                                if decoded_line:
+                                    yield json.loads(decoded_line)
 
     if not zip_read:
         raise FileNotFoundError(f"No .zip files were found in dir: {path}!")
