@@ -1,3 +1,4 @@
+import orjson
 import json
 import zipfile
 import os
@@ -229,26 +230,19 @@ def preprocess_data() -> None:
 
 
 def _json_generator(path: Path) -> Generator[dict[str, Any], None, None]:
-    """Yield JSON records from loose .json files and .zip archives."""
+    """Yield JSON records from .zip archives with .jsonl files."""
     zip_read = False
 
     for file_path in path.iterdir():
-        # Handle loose JSON files (just in case we want to test a select few)
-        if file_path.suffix == ".json":
-            with open(file_path, encoding="utf-8") as f:
-                yield json.load(f)
-
-        # Handle ZIP files directly in memory
-        elif file_path.suffix == ".zip":
+        if file_path.suffix == ".zip":
             zip_read = True
             with zipfile.ZipFile(file_path, "r") as z:
                 for filename in z.namelist():
                     if filename.endswith(".jsonl"):
                         with z.open(filename) as f:
                             for line in f:
-                                decoded_line = line.decode("utf-8").strip()
-                                if decoded_line:
-                                    yield json.loads(decoded_line)
+                                if line.strip():
+                                    yield orjson.loads(line)
 
     if not zip_read:
         raise FileNotFoundError(f"No .zip files were found in dir: {path}!")
