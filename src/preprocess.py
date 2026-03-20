@@ -1,4 +1,6 @@
+import orjson
 import json
+import zipfile
 import os
 import argparse
 import logging
@@ -6,6 +8,13 @@ from datasets import Dataset, Features, Value
 from typing import Any, Generator
 from pathlib import Path
 from dataclasses import dataclass
+
+
+# Force Hugging Face cache to a visible directory to bypass Slurm/HPC issues
+os.environ["HF_DATASETS_CACHE"] = (
+    "/ceph/project/SW10-CausalLM/ciphertext-generation/hf_cache"
+)
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -223,10 +232,22 @@ def preprocess_data() -> None:
 
 
 def _json_generator(path: Path) -> Generator[dict[str, Any], None, None]:
+    """Yield JSON records from .zip archives with .jsonl files."""
+    zip_read = False
+
     for file_path in path.iterdir():
-        if file_path.suffix == ".json":
-            with open(file_path, encoding="utf-8") as f:
-                yield json.load(f)
+        if file_path.suffix == ".zip":
+            zip_read = True
+            with zipfile.ZipFile(file_path, "r") as z:
+                for filename in z.namelist():
+                    if filename.endswith(".jsonl"):
+                        with z.open(filename) as f:
+                            for line in f:
+                                if line.strip():
+                                    yield orjson.loads(line)
+
+    if not zip_read:
+        raise FileNotFoundError(f"No .zip files were found in dir: {path}!")
 
 
 if __name__ == "__main__":
