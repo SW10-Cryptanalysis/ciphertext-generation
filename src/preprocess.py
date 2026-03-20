@@ -2,18 +2,19 @@ import orjson
 import json
 import zipfile
 import os
-import argparse
-import logging
-from datasets import Dataset, Features, Value
-from typing import Any, Generator
-from pathlib import Path
-from dataclasses import dataclass
 
 
 # Force Hugging Face cache to a visible directory to bypass Slurm/HPC issues
 os.environ["HF_DATASETS_CACHE"] = (
     "/ceph/project/SW10-CausalLM/ciphertext-generation/hf_cache"
 )
+
+import argparse
+import logging
+from datasets import Dataset, Features, Value
+from typing import Any, Generator
+from pathlib import Path
+from dataclasses import dataclass
 
 
 logging.basicConfig(
