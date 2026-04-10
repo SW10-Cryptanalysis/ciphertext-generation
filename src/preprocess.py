@@ -179,30 +179,57 @@ class RawToArrowConverter:
 
 
 def preprocess_data() -> None:
+    """Execute the entry point for preprocessing raw JSON data into Arrow format.
+
+    Parses CLI arguments, loads the configuration, and iterates through
+    data splits to save tokenized datasets to disk.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--spaces", action="store_true")
-    parser.add_argument(
-        "--dry-run", action="store_true", help="Print token IDs and exit."
-    )
     args = parser.parse_args()
 
     cfg = Config()
     cfg.use_spaces = args.spaces
-    cfg.load_homophones()  # will now raise if metadata file is missing
+    cfg.load_homophones()
 
-    logger.info(f"unique_homophones : {cfg.unique_homophones}")
-    logger.info(f"sep_token_id      : {cfg.sep_token_id}")
-    logger.info(f"space_token_id    : {cfg.space_token_id}")
-    logger.info(f"bos_token_id      : {cfg.bos_token_id}")
-    logger.info(f"eos_token_id      : {cfg.eos_token_id}")
-    logger.info(f"char_offset       : {cfg.char_offset}")
-    logger.info(f"tokenized_dir     : {cfg.tokenized_dir}")
+    # Initialize the converter
+    converter = RawToArrowConverter(cfg)
 
-    if args.dry_run:
-        logger.info("Dry-run mode — exiting without processing.")
-        return
+    # Load Raw JSONs
+    for split in ["Training", "Test", "Validation"]:
+        logger.info("Converting %s (Spaces: %s)...", split, cfg.use_spaces)
+        split_path = cfg.data_dir / split
+        if not split_path.exists():
+            logger.warning(f"Split path {split_path} does not exist. Skipping.")
+            continue
 
-    # ... rest of processing unchanged
+        logger.info(f"Processing {split} (Spaces: {cfg.use_spaces})...")
+
+        raw_ds = Dataset.from_generator(
+            _json_generator,
+            gen_kwargs={"path": split_path},
+            features=features,
+        )
+
+        if not isinstance(raw_ds, Dataset):
+            raise TypeError(
+                f"Expected a Dataset from the generator, but got {type(raw_ds)}.",
+            )
+
+        tokenized_ds = raw_ds.map(
+            converter.tokenize_fn,
+            num_proc=8,
+            remove_columns=[
+                "ciphertext",
+                "ciphertext_with_boundaries",
+                "plaintext",
+                "plaintext_with_boundaries",
+            ],
+        )
+
+        save_path = cfg.tokenized_dir / split
+        tokenized_ds.save_to_disk(str(save_path))
+        logger.info("Saved to %s", save_path)
 
 
 def _json_generator(path: Path) -> Generator[dict[str, Any], None, None]:
