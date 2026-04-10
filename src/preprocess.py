@@ -31,7 +31,7 @@ class Config:
     unique_homophones: int = 2503
     data_dir: Path = Path(__file__).parent.parent.parent / "Ciphers"
     output_dir: Path = Path(__file__).parent.parent.parent / "outputs"
-    homophone_file: str = "metadata"
+    homophone_file: str = "metadata.json"
     use_spaces: bool = False
 
     @property
