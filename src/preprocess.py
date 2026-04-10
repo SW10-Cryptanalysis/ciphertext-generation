@@ -23,20 +23,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger("preprocess.py")
 
-TEXT_LEN = 10_000
-SEQ_LEN = TEXT_LEN * 2 + 3
-
 
 @dataclass
 class Config:
     """Config for arrow dataset creation."""
 
-    # 10k*2 characters + BOS, EOS, SEP
-    max_context: int = SEQ_LEN
-    unique_homophones: int = 500
+    unique_homophones: int = 2503
     data_dir: Path = Path(__file__).parent.parent.parent / "Ciphers"
     output_dir: Path = Path(__file__).parent.parent.parent / "outputs"
-    homophone_file: str = "metadata"
+    homophone_file: str = "metadata.json"
     use_spaces: bool = False
 
     @property
@@ -80,20 +75,21 @@ class Config:
     def load_homophones(self) -> None:
         """Load the homophone metadata file and set the unique homophone count."""
         homophone_path = os.path.join(self.data_dir, self.homophone_file)
-        if os.path.exists(homophone_path):
-            try:
-                with open(homophone_path) as f:
-                    meta = json.load(f)
-                    homophones = int(meta["max_symbol_id"])
-                    self.unique_homophones = homophones
-            except OSError as e:
-                logger.warning(f"Could not read file: {self.homophone_file}")
-                logger.warning(f"Using default value: {self.unique_homophones}")
-                logger.warning(f"Error: {e}")
-            except (ValueError, KeyError) as e:
-                logger.warning(f"Invalid or missing data in {self.homophone_file}")
-                logger.warning(f"Using default value: {self.unique_homophones}")
-                logger.warning(f"Error: {e}")
+        if not os.path.exists(homophone_path):
+            raise FileNotFoundError(
+                f"Metadata file not found at: {homophone_path}. "
+                "Cannot determine unique_homophones — aborting.",
+            )
+        try:
+            with open(homophone_path) as f:
+                meta = json.load(f)
+                self.unique_homophones = int(meta["max_symbol_id"])
+        except OSError as e:
+            raise OSError(f"Could not read file: {homophone_path}") from e
+        except (ValueError, KeyError) as e:
+            raise ValueError(
+                f"Invalid or missing 'max_symbol_id' in {homophone_path}",
+            ) from e
 
 
 features = Features(
@@ -145,22 +141,6 @@ class RawToArrowConverter:
             elif "a" <= char <= "z":
                 plain_ids.append(ord(char) - ord("a") + self.cfg.char_offset)
 
-        # BOS, EOS, SEP
-        special_tokens = [
-            self.cfg.bos_token_id,
-            self.cfg.sep_token_id,
-            self.cfg.eos_token_id,
-        ]
-        # max allowed length, but with room for special tokens
-        max_content_budget = self.cfg.max_context - len(special_tokens)
-        total_content_len = len(cipher_ids) + len(plain_ids)
-
-        if total_content_len > max_content_budget:
-            # cut equally if spaces makes the sequence longer than allowed
-            half_budget = max_content_budget // 2
-            cipher_ids = cipher_ids[:half_budget]
-            plain_ids = plain_ids[: (max_content_budget - len(cipher_ids))]
-
         input_ids = (
             [self.cfg.bos_token_id]
             + cipher_ids
@@ -175,6 +155,7 @@ class RawToArrowConverter:
             "input_ids": input_ids,
             "labels": labels,
             "raw_plaintext": example[self.t_key],
+            "plain_length": len(plain_ids),
         }
 
 
@@ -192,8 +173,18 @@ def preprocess_data() -> None:
     cfg.use_spaces = args.spaces
     cfg.load_homophones()
 
+    logger.info(f"unique_homophones : {cfg.unique_homophones}")
+    logger.info(f"sep_token_id      : {cfg.sep_token_id}")
+    logger.info(f"space_token_id    : {cfg.space_token_id}")
+    logger.info(f"bos_token_id      : {cfg.bos_token_id}")
+    logger.info(f"eos_token_id      : {cfg.eos_token_id}")
+    logger.info(f"char_offset       : {cfg.char_offset}")
+    logger.info(f"tokenized_dir     : {cfg.tokenized_dir}")
+
     # Initialize the converter
     converter = RawToArrowConverter(cfg)
+
+    global_max_len = 0
 
     # Load Raw JSONs
     for split in ["Training", "Test", "Validation"]:
@@ -227,9 +218,17 @@ def preprocess_data() -> None:
             ],
         )
 
+        current_max_len = max(tokenized_ds["plain_length"])
+        if current_max_len > global_max_len:
+            global_max_len = current_max_len
+
+        tokenized_ds = tokenized_ds.remove_columns(["plain_length"])
+
         save_path = cfg.tokenized_dir / split
         tokenized_ds.save_to_disk(str(save_path))
         logger.info("Saved to %s", save_path)
+
+    logger.info(f"Max length {global_max_len}!!!")
 
 
 def _json_generator(path: Path) -> Generator[dict[str, Any], None, None]:

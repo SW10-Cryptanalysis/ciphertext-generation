@@ -10,7 +10,7 @@
 set -e
 
 # Go to the directory where the script is
-cd /ceph/project/SW10-CausalLM/ciphertext_generation
+cd /ceph/project/SW10-CausalLM/ciphertext-generation
 
 # Add uv to path if necessary
 export PATH="$HOME/.local/bin:$PATH"
