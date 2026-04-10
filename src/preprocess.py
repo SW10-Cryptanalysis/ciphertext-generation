@@ -227,7 +227,8 @@ def preprocess_data() -> None:
         save_path = cfg.tokenized_dir / split
         tokenized_ds.save_to_disk(str(save_path))
         logger.info("Saved to %s", save_path)
-        logger.info(f"Max length {global_max_len}!!!")
+
+    logger.info(f"Max length {global_max_len}!!!")
 
 
 def _json_generator(path: Path) -> Generator[dict[str, Any], None, None]:
