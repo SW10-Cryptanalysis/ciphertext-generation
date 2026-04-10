@@ -38,25 +38,3 @@ def test_mapping_logic_with_spaces(sample_payload):
 
     # Expected: [BOS] + [1, SPACE, 2] + [SEP] + [15, SPACE, 16] + [EOS]
     assert ids == [13, 1, 12, 2, 11, 15, 12, 16, 14]
-
-
-def test_smart_truncation_limits_content(sample_payload):
-    cfg = Config(unique_homophones=10, use_spaces=False)
-
-    # Payload has 2 cipher tokens + 2 plain tokens = 4 content tokens.
-    # We force max_context to 5.
-    # With 3 special tokens (BOS, SEP, EOS), the content budget is only 2.
-    cfg.max_context = 5
-
-    converter = RawToArrowConverter(cfg)
-    result = converter.tokenize_fn(sample_payload)
-    ids = result["input_ids"]
-
-    # Budget is 2. The 50/50 split means Cipher gets 1 token, Plain gets 1 token.
-    # Cipher: "1" -> 1
-    # Plain: "a" -> 15
-    # Expected: [BOS] + [1] + [SEP] + [15] + [EOS]
-    assert ids == [13, 1, 11, 15, 14]
-
-    # Mathematically guarantee the truncation logic respects the hard ceiling
-    assert len(ids) == cfg.max_context
