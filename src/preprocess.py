@@ -27,7 +27,7 @@ class Config:
 
     task: str = "causal"
     use_spaces: bool = False
-    unique_homophones: int = 2503
+    unique_homophones: int = 0
     data_dir: Path = Path(__file__).parent.parent.parent / "Ciphers"
     homophone_file: str = "metadata.json"
 
@@ -259,6 +259,9 @@ def main() -> None:
 
     cfg = Config(use_spaces=args.spaces, task=args.task)
     cfg.load_homophones()
+
+    if cfg.unique_homophones == 0:
+        raise ValueError("unique_homophones has not been set.")
 
     logger.info("Task              : %s", cfg.task.upper())
     logger.info("unique_homophones : %d", cfg.unique_homophones)
