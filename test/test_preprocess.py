@@ -1,40 +1,107 @@
 import pytest
+from dataclasses import dataclass
+from typing import Any
+
+
 from preprocess import RawToArrowConverter, Config
 
 
-@pytest.fixture
-def sample_payload():
-    """Provide a sample dictionary as it would appear when loaded from JSON."""
-    return {
+@dataclass
+class TokenizeTestCase:
+    """Defines a strict scenario for the tokenization logic."""
+
+    name: str
+    task: str
+    use_spaces: bool
+    payload: dict[str, Any]
+    expected_input_ids: list[int]
+    expected_labels: list[int]
+    expected_plain_length: int
+
+
+def get_tokenize_cases() -> list[TokenizeTestCase]:
+    """Generates all permutations of task, spacing, and symbol arrangements."""
+
+    payload_simple = {
         "ciphertext": "1 2",
         "plaintext": "ab",
         "ciphertext_with_boundaries": "1 _ 2",
         "plaintext_with_boundaries": "a _ b",
-        "redundancy": 20,
     }
 
+    payload_duplicates = {
+        "ciphertext": "1 2 1",
+        "plaintext": "aba",
+        "ciphertext_with_boundaries": "1 _ 2 _ 1",
+        "plaintext_with_boundaries": "a _ b _ a",
+    }
 
-def test_mapping_logic_no_spaces(sample_payload):
-    # Set unique_homophones=10 to lock the special tokens to the expected IDs
-    cfg = Config(unique_homophones=10, use_spaces=False)
-    converter = RawToArrowConverter(cfg)
+    return [
+        TokenizeTestCase(
+            name="causal_no_spaces",
+            task="causal",
+            use_spaces=False,
+            payload=payload_simple,
+            expected_input_ids=[13, 1, 2, 11, 15, 16, 14],
+            expected_labels=[13, 1, 2, 11, 15, 16, 14],
+            expected_plain_length=2,
+        ),
+        TokenizeTestCase(
+            name="causal_with_spaces",
+            task="causal",
+            use_spaces=True,
+            payload=payload_simple,
+            expected_input_ids=[13, 1, 12, 2, 11, 15, 12, 16, 14],
+            expected_labels=[13, 1, 12, 2, 11, 15, 12, 16, 14],
+            expected_plain_length=3,
+        ),
+        TokenizeTestCase(
+            name="mapping_no_spaces",
+            task="mapping",
+            use_spaces=False,
+            payload=payload_simple,
+            expected_input_ids=[13, 1, 2, 14],
+            expected_labels=[0, 1, -100, -100],
+            expected_plain_length=0,
+        ),
+        TokenizeTestCase(
+            name="mapping_with_spaces",
+            task="mapping",
+            use_spaces=True,
+            payload=payload_simple,
+            expected_input_ids=[13, 1, 12, 2, 14],
+            expected_labels=[0, 1, -100, -100, -100],
+            expected_plain_length=0,
+        ),
+        TokenizeTestCase(
+            name="mapping_with_duplicate_symbols",
+            task="mapping",
+            use_spaces=False,
+            payload=payload_duplicates,
+            expected_input_ids=[13, 1, 2, 1, 14],
+            expected_labels=[0, 1, -100, -100],
+            expected_plain_length=0,
+        ),
+    ]
 
-    result = converter.tokenize_fn(sample_payload)
-    ids = result["input_ids"]
 
-    # [BOS] + [1, 2] + [SEP] + [15, 16] + [EOS]
-    assert ids == [13, 1, 2, 11, 15, 16, 14]
+class TestRawToArrowConverter:
+    """Thorough test suite for dataset tokenization logic."""
 
-    # Verify joint distribution labels match inputs exactly
-    assert result["labels"] == ids
+    @pytest.mark.parametrize("case", get_tokenize_cases(), ids=lambda c: c.name)
+    def test_tokenize_logic(self, case: TokenizeTestCase) -> None:
+        """Verifies input_ids generation, label alignment, and length calculation."""
 
+        cfg = Config(task=case.task, use_spaces=case.use_spaces, unique_homophones=10)
 
-def test_mapping_logic_with_spaces(sample_payload):
-    cfg = Config(unique_homophones=10, use_spaces=True)
-    converter = RawToArrowConverter(cfg)
+        converter = RawToArrowConverter(cfg)
+        result = converter.tokenize_fn(case.payload)
 
-    result = converter.tokenize_fn(sample_payload)
-    ids = result["input_ids"]
+        assert result["input_ids"] == case.expected_input_ids
+        assert result["labels"] == case.expected_labels
+        assert result["plain_length"] == case.expected_plain_length
 
-    # Expected: [BOS] + [1, SPACE, 2] + [SEP] + [15, SPACE, 16] + [EOS]
-    assert ids == [13, 1, 12, 2, 11, 15, 12, 16, 14]
+        expected_raw_key = (
+            "plaintext_with_boundaries" if case.use_spaces else "plaintext"
+        )
+        assert result["raw_plaintext"] == case.payload[expected_raw_key]
