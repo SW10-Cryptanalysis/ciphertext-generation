@@ -263,9 +263,14 @@ def main() -> None:
     if cfg.unique_homophones == 0:
         raise ValueError("unique_homophones has not been set.")
 
-    logger.info("Task              : %s", cfg.task.upper())
-    logger.info("unique_homophones : %d", cfg.unique_homophones)
-    logger.info("tokenized_dir     : %s", cfg.tokenized_dir)
+    logger.info(f"Task              : {cfg.task.upper()}")
+    logger.info(f"unique_homophones : {cfg.unique_homophones}")
+    logger.info(f"sep_token_id      : {cfg.sep_token_id}")
+    logger.info(f"space_token_id    : {cfg.space_token_id}")
+    logger.info(f"bos_token_id      : {cfg.bos_token_id}")
+    logger.info(f"eos_token_id      : {cfg.eos_token_id}")
+    logger.info(f"char_offset       : {cfg.char_offset}")
+    logger.info(f"tokenized_dir     : {cfg.tokenized_dir}")
 
     converter = RawToArrowConverter(cfg)
     global_max_len = 0
