@@ -34,6 +34,7 @@ omit = [
     "src/gen_training.py", 
     "src/preprocess.py",
     "src/map_genres.py",
+    "src/truncate_ciphers.py",
 ]
 
 [tool.coverage.report]
