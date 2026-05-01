@@ -5,9 +5,10 @@ import argparse
 from truncation.cipher_truncator import CipherTruncator
 from truncation.truncation_config import TruncationConfig, create_length_sampler
 from truncation.dataset_writer import DatasetWriter
+import zipfile
 
 
-def discover_dataset_files(dataset_dir: Path, extension: str = ".jsonl") -> list[Path]:
+def discover_dataset_files(dataset_dir: Path, extension: str = ".zip") -> list[Path]:
     """Discover all files in the dataset directory with the specified extension.
 
     Args:
@@ -32,6 +33,28 @@ def discover_dataset_files(dataset_dir: Path, extension: str = ".jsonl") -> list
     return sorted(file_paths)
 
 
+def read_jsonl(
+    jsonl_filenames: list[str],
+    z: zipfile.ZipFile,
+) -> Iterator[dict[str, Any]]:
+    """Read a jsonl file from inside a zip archive and yield contents as dictionaries.
+
+    Args:
+        jsonl_filenames (list[str]): A list of file names to read from.
+        z (zipfile.ZipFile): The zip archive to read from.
+
+    Yields:
+        dict[str, Any]: A dictionary containing the json data from the file.
+
+    """
+    for jsonl_filename in jsonl_filenames:
+        with z.open(jsonl_filename, "r") as f:
+            for line in f:
+                decoded_line = line.decode("utf-8").strip()
+                if decoded_line:
+                    yield json.loads(decoded_line)
+
+
 def generate_continuous_stream(file_paths: list[Path]) -> Iterator[dict[str, Any]]:
     """Generate a continuous stream of json data from a list of file paths.
 
@@ -42,11 +65,12 @@ def generate_continuous_stream(file_paths: list[Path]) -> Iterator[dict[str, Any
         dict[str, Any]: A dictionary containing the json data from each file.
 
     """
-    for file_path in file_paths:
-        with open(file_path) as f:
-            for line in f:
-                if line.strip():
-                    yield json.loads(line)
+    for zip_path in file_paths:
+        with zipfile.ZipFile(zip_path, "r") as z:
+            # Find all internal files that match your target extension
+            jsonl_filenames = [name for name in z.namelist() if name.endswith(".jsonl")]
+
+            yield from read_jsonl(jsonl_filenames, z=z)
 
 
 def parse_args() -> argparse.Namespace:
@@ -91,8 +115,6 @@ def run_pipeline(dataset_dir: Path, output_dir: Path) -> None:
     with DatasetWriter(output_dir=output_dir) as writer:
         for truncated in truncated_stream:
             writer.write(truncated)
-
-
 
 
 if __name__ == "__main__":
