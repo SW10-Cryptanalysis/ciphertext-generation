@@ -48,7 +48,7 @@ def test_cipher_truncater_yields(mocker, test_case: TruncaterTestCase):
     """Validates target length sampling, chunk boundary logic, and tail dropping."""
 
     mocker.patch(
-        "encipherment.cipher.SubstitutionCipher.from_json",
+        "encipherment.cipher.HomophonicCipher.from_json",
         return_value=HomophonicCipher,
     )
 

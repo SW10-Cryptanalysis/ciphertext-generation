@@ -1,6 +1,6 @@
 from typing import Any, Iterator, Callable
 from utils.text_sampling import TextStream
-from encipherment.cipher import SubstitutionCipher
+from encipherment.cipher import SubstitutionCipher, HomophonicCipher
 import json
 
 
@@ -44,7 +44,7 @@ class CipherTruncator:
             plaintext = cipher_obj.get("plaintext", "")
 
             if self._calculate_true_length(plaintext) <= self.max_length:
-                yield SubstitutionCipher.from_json(json.dumps(cipher_obj))
+                yield HomophonicCipher.from_json(json.dumps(cipher_obj))
                 continue
 
             yield from self._process_long_plaintext(plaintext, cipher_obj)
