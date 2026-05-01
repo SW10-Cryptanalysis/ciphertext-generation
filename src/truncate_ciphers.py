@@ -24,7 +24,7 @@ def discover_dataset_files(dataset_dir: Path, extension: str = ".zip") -> list[P
     if not dataset_dir.exists():
         raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
 
-    file_paths = list(dataset_dir.rglob(extension))
+    file_paths = list(dataset_dir.rglob(f"*{extension}"))
     if not file_paths:
         raise FileNotFoundError(
             f"No files found with extension {extension} in {dataset_dir}",
