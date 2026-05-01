@@ -1,0 +1,30 @@
+#!/bin/bash
+#SBATCH --job-name=cipher_truncation
+#SBATCH --output=logs/cipher_trunc_%j.out   # Standard output/error log (%j expands to jobID)
+#SBATCH --time=12:00:00                     # Max wall time limit (hours:minutes:seconds)
+#SBATCH --nodes=1                           # We only need one node
+#SBATCH --ntasks=1                          # Run a single task
+#SBATCH --cpus-per-task=2                   # Number of CPU cores to allocate
+#SBATCH --mem=8G                            # Memory limit per node (8GB is plenty for our stream)
+#SBATCH --partition=compute                 # Target partition
+
+# Exit on any error
+set -e
+
+echo "Starting cipher truncation job..."
+echo "Running on node: $SLURM_JOB_NODELIST"
+
+# Create the logs and output directories if they don't exist
+mkdir -p logs
+mkdir -p ../Ciphers/Truncated
+
+# Navigate to the project root so uv can resolve the project environment
+cd /ceph/project/SW10-CausalLM/ciphertext-generation
+
+# Execute the pipeline directly through uv.
+# uv automatically handles the environment isolation.
+srun uv run src/truncate_ciphers.py \
+    --directory ../Ciphers/Training \
+    --output ../Ciphers/Truncated
+
+echo "Job completed successfully!"

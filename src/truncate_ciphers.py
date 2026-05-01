@@ -6,6 +6,7 @@ from truncation.cipher_truncator import CipherTruncator
 from truncation.truncation_config import TruncationConfig, create_length_sampler
 from truncation.dataset_writer import DatasetWriter
 import zipfile
+from tqdm import tqdm
 
 
 def discover_dataset_files(dataset_dir: Path, extension: str = ".zip") -> list[Path]:
@@ -112,8 +113,16 @@ def run_pipeline(dataset_dir: Path, output_dir: Path) -> None:
     truncator = CipherTruncator(continuous_stream, config.max_length, length_sampler)
     truncated_stream = truncator.process_stream()
 
+    approximate_total = len(file_paths) * 10000
+
     with DatasetWriter(output_dir=output_dir) as writer:
-        for truncated in truncated_stream:
+        for truncated in tqdm(
+            truncated_stream,
+            total=approximate_total,
+            desc="Truncating and routing ciphers",
+            unit="seq",
+            smoothing=0.1,
+        ):
             writer.write(truncated)
 
 
