@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1                          # Run a single task
 #SBATCH --cpus-per-task=2                   # Number of CPU cores to allocate
 #SBATCH --mem=8G                            # Memory limit per node (8GB is plenty for our stream)
-#SBATCH --partition=compute                 # Target partition
+#SBATCH --partition=l4                      # Target partition
 
 # Exit on any error
 set -e
