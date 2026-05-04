@@ -74,7 +74,7 @@ class Config:
         if self.task == "mapping":
             suffix += "_mapping"
 
-        # Append the folder name if it exists (e.g., producing "tokenized_normal_truncated")
+        # Append the folder name if it exists
         if self.folder:
             suffix += f"_{self.folder.lower()}"
 
