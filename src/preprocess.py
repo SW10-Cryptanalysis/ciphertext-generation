@@ -73,7 +73,13 @@ class Config:
         suffix = "spaced" if self.use_spaces else "normal"
         if self.task == "mapping":
             suffix += "_mapping"
-        return self.data_dir / f"tokenized_{suffix}"
+
+        # Append the folder name if it exists (e.g., producing "tokenized_normal_truncated")
+        if self.folder:
+            suffix += f"_{self.folder.lower()}"
+
+        # Use base_dir to save in the root Ciphers folder instead of nesting it
+        return self.base_dir / f"tokenized_{suffix}"
 
     def load_homophones(self) -> None:
         """Load the homophone metadata file."""
