@@ -9,7 +9,6 @@ from typing import Any, Generator
 from pathlib import Path
 from dataclasses import dataclass
 
-
 os.environ["HF_DATASETS_CACHE"] = (
     "/ceph/project/SW10-CausalLM/ciphertext-generation/hf_cache"
 )
@@ -28,8 +27,20 @@ class Config:
     task: str = "causal"
     use_spaces: bool = False
     unique_homophones: int = 0
-    data_dir: Path = Path(__file__).parent.parent.parent / "Ciphers"
+    folder: str = ""
     homophone_file: str = "metadata.json"
+
+    @property
+    def base_dir(self) -> Path:
+        """The root Ciphers directory."""
+        return Path(__file__).parent.parent.parent / "Ciphers"
+
+    @property
+    def data_dir(self) -> Path:
+        """The target directory to process, appending the folder flag if provided."""
+        if self.folder:
+            return self.base_dir / self.folder
+        return self.base_dir
 
     @property
     def sep_token_id(self) -> int:
@@ -66,7 +77,8 @@ class Config:
 
     def load_homophones(self) -> None:
         """Load the homophone metadata file."""
-        homophone_path = self.data_dir / self.homophone_file
+        # Always look in the base Ciphers directory for metadata.json
+        homophone_path = self.base_dir / self.homophone_file
         if not homophone_path.exists():
             raise FileNotFoundError(f"Metadata file not found at: {homophone_path}")
         try:
@@ -197,6 +209,12 @@ def parse_args() -> argparse.Namespace:
         help="Format data for sequence generation (causal) or token classification"
         " (mapping).",
     )
+    parser.add_argument(
+        "--folder",
+        type=str,
+        default="",
+        help="Subfolder in Ciphers to process (e.g., 'Truncated').",
+    )
     return parser.parse_args()
 
 
@@ -257,13 +275,14 @@ def main() -> None:
     """Entry point for preprocessing."""
     args = parse_args()
 
-    cfg = Config(use_spaces=args.spaces, task=args.task)
+    cfg = Config(use_spaces=args.spaces, task=args.task, folder=args.folder)
     cfg.load_homophones()
 
     if cfg.unique_homophones == 0:
         raise ValueError("unique_homophones has not been set.")
 
     logger.info(f"Task              : {cfg.task.upper()}")
+    logger.info(f"data_dir          : {cfg.data_dir}")
     logger.info(f"unique_homophones : {cfg.unique_homophones}")
     logger.info(f"sep_token_id      : {cfg.sep_token_id}")
     logger.info(f"space_token_id    : {cfg.space_token_id}")
@@ -294,15 +313,27 @@ def _yield_from_zip(zip_path: Path) -> Generator[dict[str, Any], None, None]:
                         yield orjson.loads(line)
 
 
-def _json_generator(path: Path) -> Generator[dict[str, Any], None, None]:
-    """Yield JSON records from all .zip archives in the specified directory."""
-    zip_files = list(path.glob("*.zip"))
+def _yield_from_jsonl(jsonl_path: Path) -> Generator[dict[str, Any], None, None]:
+    """Yield JSON records from a single .jsonl file."""
+    with open(jsonl_path, "rb") as f:
+        for line in f:
+            if line.strip():
+                yield orjson.loads(line)
 
-    if not zip_files:
-        raise FileNotFoundError(f"No .zip files found in: {path}")
+
+def _json_generator(path: Path) -> Generator[dict[str, Any], None, None]:
+    """Yield JSON records from all .zip and .jsonl files in the specified directory."""
+    zip_files = list(path.glob("*.zip"))
+    jsonl_files = list(path.glob("*.jsonl"))
+
+    if not zip_files and not jsonl_files:
+        raise FileNotFoundError(f"No .zip or .jsonl files found in: {path}")
 
     for zip_path in zip_files:
         yield from _yield_from_zip(zip_path)
+
+    for jsonl_path in jsonl_files:
+        yield from _yield_from_jsonl(jsonl_path)
 
 
 if __name__ == "__main__":
