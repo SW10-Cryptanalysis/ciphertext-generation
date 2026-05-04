@@ -4,6 +4,7 @@ import zipfile
 import os
 import argparse
 import logging
+import ast
 from datasets import Dataset, Features, Value
 from typing import Any, Generator
 from pathlib import Path
@@ -316,7 +317,11 @@ def _yield_from_zip(zip_path: Path) -> Generator[dict[str, Any], None, None]:
             with z.open(filename) as f:
                 for line in f:
                     if line.strip():
-                        yield orjson.loads(line)
+                        try:
+                            yield orjson.loads(line)
+                        except orjson.JSONDecodeError:
+                            # Fallback if the data is a Python dict string
+                            yield ast.literal_eval(line.decode("utf-8").strip())
 
 
 def _yield_from_jsonl(jsonl_path: Path) -> Generator[dict[str, Any], None, None]:
@@ -324,7 +329,11 @@ def _yield_from_jsonl(jsonl_path: Path) -> Generator[dict[str, Any], None, None]
     with open(jsonl_path, "rb") as f:
         for line in f:
             if line.strip():
-                yield orjson.loads(line)
+                try:
+                    yield orjson.loads(line)
+                except orjson.JSONDecodeError:
+                    # Fallback if the data is a Python dict string
+                    yield ast.literal_eval(line.decode("utf-8").strip())
 
 
 def _json_generator(path: Path) -> Generator[dict[str, Any], None, None]:
