@@ -213,7 +213,7 @@ def parse_args() -> argparse.Namespace:
         "--folder",
         type=str,
         default="",
-        help="Subfolder in Ciphers to process (e.g., 'Truncated'). Leaves default if empty.",
+        help="Subfolder in Ciphers to process (e.g., 'Truncated').",
     )
     return parser.parse_args()
 
