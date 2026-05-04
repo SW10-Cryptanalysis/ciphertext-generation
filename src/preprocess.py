@@ -27,8 +27,20 @@ class Config:
     task: str = "causal"
     use_spaces: bool = False
     unique_homophones: int = 0
-    data_dir: Path = Path(__file__).parent.parent.parent / "Ciphers" / "Truncated"
+    folder: str = ""
     homophone_file: str = "metadata.json"
+
+    @property
+    def base_dir(self) -> Path:
+        """The root Ciphers directory."""
+        return Path(__file__).parent.parent.parent / "Ciphers"
+
+    @property
+    def data_dir(self) -> Path:
+        """The target directory to process, appending the folder flag if provided."""
+        if self.folder:
+            return self.base_dir / self.folder
+        return self.base_dir
 
     @property
     def sep_token_id(self) -> int:
@@ -65,8 +77,8 @@ class Config:
 
     def load_homophones(self) -> None:
         """Load the homophone metadata file."""
-        # Adjusted to look in the parent directory since metadata.json is in Ciphers/
-        homophone_path = self.data_dir.parent / self.homophone_file
+        # Always look in the base Ciphers directory for metadata.json
+        homophone_path = self.base_dir / self.homophone_file
         if not homophone_path.exists():
             raise FileNotFoundError(f"Metadata file not found at: {homophone_path}")
         try:
@@ -197,6 +209,12 @@ def parse_args() -> argparse.Namespace:
         help="Format data for sequence generation (causal) or token classification"
         " (mapping).",
     )
+    parser.add_argument(
+        "--folder",
+        type=str,
+        default="",
+        help="Subfolder in Ciphers to process (e.g., 'Truncated'). Leaves default if empty.",
+    )
     return parser.parse_args()
 
 
@@ -257,7 +275,7 @@ def main() -> None:
     """Entry point for preprocessing."""
     args = parse_args()
 
-    cfg = Config(use_spaces=args.spaces, task=args.task)
+    cfg = Config(use_spaces=args.spaces, task=args.task, folder=args.folder)
     cfg.load_homophones()
 
     if cfg.unique_homophones == 0:
