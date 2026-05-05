@@ -41,7 +41,7 @@ class CipherTruncator:
 
         """
         for cipher_obj in self.stream:
-            plaintext = cipher_obj.get("plaintext", "")
+            plaintext = cipher_obj.get("plaintext_with_boundaries", "")
 
             if self._calculate_true_length(plaintext) <= self.max_length:
                 yield SubstitutionCipher.from_json(json.dumps(cipher_obj))
@@ -51,7 +51,7 @@ class CipherTruncator:
 
     def _process_long_plaintext(
         self,
-        plaintext: str,
+        bounded_text: str,
         cipher_obj: dict[str, Any],
     ) -> Iterator[TextStream]:
         """Extract length-compliant chunks from a long plaintext iteratively.
@@ -60,14 +60,14 @@ class CipherTruncator:
         target length to maintain strict distributional integrity.
 
         Args:
-            plaintext (str): The long plaintext to split.
+            bounded_text (str): The long plaintext with word boundaries to split.
             cipher_obj (dict[str, Any]): The cipher object containing the plaintext.
 
         Yields:
             TextStream: A TextStream object containing the chunk of plaintext.
 
         """
-        words = plaintext.split("_")
+        words = bounded_text.split("_")
         current_index = 0
         total_words = len(words)
 
