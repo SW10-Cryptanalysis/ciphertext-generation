@@ -74,6 +74,15 @@ To process the data without spaces:
 uv run src/preprocess.py
 ```
 
+#### Using slurm
+```bash
+sbatch convert.slurm --spaces --task causal --folder Truncated_4000
+```
+
+```bash
+sbatch convert.slurm --task mapping --folder Truncated_4000
+```
+
 ## JSON Data Structure
 
 Each generated cipher is saved as a JSON object with the following structure:
