@@ -20,7 +20,7 @@ class TruncaterTestCase:
 
 truncater_test_cases = [
     TruncaterTestCase(
-        input_stream=[{"plaintext": "short_text_here"}],
+        input_stream=[{"plaintext_with_boundaries": "short_text_here"}],
         max_length=20,
         sampled_lengths=[],
         expected_yield_types=[SubstitutionCipher],
@@ -29,7 +29,7 @@ truncater_test_cases = [
     TruncaterTestCase(
         input_stream=[
             {
-                "plaintext": "this_is_a_very_long_plaintext_that_requires_chunking_and_then_dropping_the_tail",
+                "plaintext_with_boundaries": "this_is_a_very_long_plaintext_that_requires_chunking_and_then_dropping_the_tail",
                 "genres": ["test"],
                 "source_id": "1",
                 "source_name": "test_source",
