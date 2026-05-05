@@ -5,9 +5,11 @@ import argparse
 from truncation.cipher_truncator import CipherTruncator
 from truncation.truncation_config import TruncationConfig, create_length_sampler
 from truncation.dataset_writer import DatasetWriter
+import zipfile
+from tqdm import tqdm
 
 
-def discover_dataset_files(dataset_dir: Path, extension: str = ".jsonl") -> list[Path]:
+def discover_dataset_files(dataset_dir: Path, extension: str = ".zip") -> list[Path]:
     """Discover all files in the dataset directory with the specified extension.
 
     Args:
@@ -23,13 +25,35 @@ def discover_dataset_files(dataset_dir: Path, extension: str = ".jsonl") -> list
     if not dataset_dir.exists():
         raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
 
-    file_paths = list(dataset_dir.rglob(extension))
+    file_paths = list(dataset_dir.rglob(f"*{extension}"))
     if not file_paths:
         raise FileNotFoundError(
             f"No files found with extension {extension} in {dataset_dir}",
         )
 
     return sorted(file_paths)
+
+
+def read_jsonl(
+    jsonl_filenames: list[str],
+    z: zipfile.ZipFile,
+) -> Iterator[dict[str, Any]]:
+    """Read a jsonl file from inside a zip archive and yield contents as dictionaries.
+
+    Args:
+        jsonl_filenames (list[str]): A list of file names to read from.
+        z (zipfile.ZipFile): The zip archive to read from.
+
+    Yields:
+        dict[str, Any]: A dictionary containing the json data from the file.
+
+    """
+    for jsonl_filename in jsonl_filenames:
+        with z.open(jsonl_filename, "r") as f:
+            for line in f:
+                decoded_line = line.decode("utf-8").strip()
+                if decoded_line:
+                    yield json.loads(decoded_line)
 
 
 def generate_continuous_stream(file_paths: list[Path]) -> Iterator[dict[str, Any]]:
@@ -42,11 +66,12 @@ def generate_continuous_stream(file_paths: list[Path]) -> Iterator[dict[str, Any
         dict[str, Any]: A dictionary containing the json data from each file.
 
     """
-    for file_path in file_paths:
-        with open(file_path) as f:
-            for line in f:
-                if line.strip():
-                    yield json.loads(line)
+    for zip_path in file_paths:
+        with zipfile.ZipFile(zip_path, "r") as z:
+            # Find all internal files that match your target extension
+            jsonl_filenames = [name for name in z.namelist() if name.endswith(".jsonl")]
+
+            yield from read_jsonl(jsonl_filenames, z=z)
 
 
 def parse_args() -> argparse.Namespace:
@@ -88,11 +113,17 @@ def run_pipeline(dataset_dir: Path, output_dir: Path) -> None:
     truncator = CipherTruncator(continuous_stream, config.max_length, length_sampler)
     truncated_stream = truncator.process_stream()
 
+    approximate_total = len(file_paths) * 10000
+
     with DatasetWriter(output_dir=output_dir) as writer:
-        for truncated in truncated_stream:
+        for truncated in tqdm(
+            truncated_stream,
+            total=approximate_total,
+            desc="Truncating and routing ciphers",
+            unit="seq",
+            smoothing=0.1,
+        ):
             writer.write(truncated)
-
-
 
 
 if __name__ == "__main__":
