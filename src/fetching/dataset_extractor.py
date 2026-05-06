@@ -121,7 +121,7 @@ class DatasetExtractor:
             "fallback_genres": fg,
         }
 
-    def get_full_stream(self) -> IterableDataset:
+    def get_full_stream(self) -> "IterableDataset":
         """Get the full Hugging Face stream.
 
         Returns:
