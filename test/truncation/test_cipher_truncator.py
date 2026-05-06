@@ -2,7 +2,7 @@ import pytest
 from dataclasses import dataclass
 from typing import Any
 
-from truncation.cipher_truncator import CipherTruncator
+from conversion.cipher_truncator import CipherTruncator
 from utils.text_sampling import TextStream
 from encipherment.cipher import HomophonicCipher, SubstitutionCipher
 
