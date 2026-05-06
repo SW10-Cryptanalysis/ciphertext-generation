@@ -9,7 +9,7 @@ def discover_dataset_files(dataset_dir: Path, extension: str = ".zip") -> list[P
     Args:
         dataset_dir (Path): The directory to search for files.
         extension (str, optional): The file extension to search for.
-            Defaults to ".jsonl".
+            Defaults to ".zip".
 
     Returns:
         list[Path]: A list of all files with the specified extension in the dataset
