@@ -2,7 +2,7 @@ import pytest
 from dataclasses import dataclass
 from pathlib import Path
 
-from truncation.dataset_writer import DatasetWriter
+from conversion.dataset_writer import DatasetWriter
 from encipherment.cipher import HomophonicCipher
 from fetching.corpus_sampler import TextStream
 

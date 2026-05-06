@@ -1,7 +1,9 @@
 from typing_extensions import TypedDict
-from datasets.iterable_dataset import IterableDataset
-
+from typing import TYPE_CHECKING
 from utils.formatting import format_text, clean_spaces
+
+if TYPE_CHECKING:
+    from datasets.iterable_dataset import IterableDataset
 
 
 class Book(TypedDict):
@@ -104,7 +106,7 @@ def find_boundaries(
     return start_idx, end_idx
 
 
-def randomize_stream(stream: IterableDataset) -> IterableDataset:
+def randomize_stream(stream: "IterableDataset") -> "IterableDataset":
     """Randomize the order of the stream.
 
     Args:

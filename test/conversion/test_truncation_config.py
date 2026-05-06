@@ -1,6 +1,6 @@
 import pytest
 from dataclasses import dataclass
-from truncation.truncation_config import TruncationConfig, create_length_sampler
+from conversion.truncation_config import TruncationConfig, create_length_sampler
 
 
 @dataclass

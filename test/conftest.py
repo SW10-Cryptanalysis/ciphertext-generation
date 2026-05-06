@@ -1,7 +1,17 @@
 import pytest
 import queue
 from test_data import dataset_bookstream
+from unittest.mock import MagicMock
 
+modules_to_mock = [
+    "datasets.load_dataset",
+    "datasets.interleave_datasets",
+    "datasets.IterableDataset",
+]
+
+for module in modules_to_mock:
+    mocker = MagicMock()
+    mocker.patch(module)
 
 @pytest.fixture()
 def sample_text():
