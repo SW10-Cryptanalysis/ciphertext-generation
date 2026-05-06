@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=cipher_truncation
-#SBATCH --output=logs/cipher_trunc_%j.out   # Standard output/error log (%j expands to jobID)
+#SBATCH --job-name=monoalphabetic_conversion
+#SBATCH --output=logs/monoalphabetic_conversion_%j.out   # Standard output/error log (%j expands to jobID)
 #SBATCH --time=12:00:00                     # Max wall time limit (hours:minutes:seconds)
 #SBATCH --nodes=1                           # We only need one node
 #SBATCH --ntasks=1                          # Run a single task
