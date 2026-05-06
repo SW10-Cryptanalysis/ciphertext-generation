@@ -255,7 +255,7 @@ def process_split(split_name: str, cfg: Config, converter: RawToArrowConverter) 
 
     tokenized_ds = raw_ds.map(
         converter.tokenize_fn,
-        num_proc=8,
+        num_proc=2,
         remove_columns=[
             "ciphertext",
             "ciphertext_with_boundaries",
