@@ -50,7 +50,7 @@ def record_cipher_stats(
 
             stats.record(
                 split=split_name,
-                length=len(cipher_data.get("ciphertext", "")),
+                length=len(cipher_data.get("plaintext", "")),
                 homophones=cipher_data.get("num_symbols", 0),
                 redundancy=cipher_data.get("redundancy", 0),
                 genres=cipher_data.get("genres", ["unknown"]),
