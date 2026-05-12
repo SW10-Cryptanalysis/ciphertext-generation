@@ -83,6 +83,23 @@ sbatch convert.slurm --spaces --task causal --folder Truncated_4000
 sbatch convert.slurm --task mapping --folder Truncated_4000
 ```
 
+#### Preprocessing on UCloud
+1. Upload relevant data to a folder called `Ciphers`.
+2. Upload the convert.sh script.
+3. Change the variable `TARGET_PATH` to the desired folder.
+4. Run the convert.sh script in a container.
+
+### 4. Generating New Datasets (Monoalphabetic)
+#### AI-lab
+1. Ensure the original dataset is present in the `Ciphers` folder.
+2. git clone this repository.
+3. Run relevant command from section 3.
+
+#### UCloud
+1. Ensure the original dataset is present in the `Ciphers` folder.
+2. Upload the generate_monoalphabetic.sh script.
+3. Run the generate_monoalphabetic.sh in a container.
+
 ## JSON Data Structure
 
 Each generated cipher is saved as a JSON object with the following structure:
