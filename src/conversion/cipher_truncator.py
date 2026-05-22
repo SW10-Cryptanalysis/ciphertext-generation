@@ -18,6 +18,7 @@ class CipherTruncator:
         stream: Iterator[dict[str, Any]],
         max_length: int,
         length_sampler: Callable[[], int],
+        max_amount: int | None = None,
     ) -> None:
         """Initialize the CipherTruncater.
 
@@ -25,11 +26,15 @@ class CipherTruncator:
             stream (Iterator[dict[str, Any]]): The continuous stream of cipher data.
             max_length (int): The maximum length of each cipher in characters.
             length_sampler (Callable[[], int]): A function to sample target lengths.
+            max_amount (int | None, optional): The max number of ciphers to truncate.
+                Defaults to None.
 
         """
         self.stream = stream
         self.max_length = max_length
         self.length_sampler = length_sampler
+        self.max_amount = max_amount
+        self.current_amount = 0
 
     def process_stream(self) -> Iterator[SubstitutionCipher | TextStream]:
         """Process the continuous generator of cipher dictionaries.
@@ -41,9 +46,12 @@ class CipherTruncator:
 
         """
         for cipher_obj in self.stream:
+            if self.max_amount and self.current_amount >= self.max_amount:
+                break
             plaintext = cipher_obj.get("plaintext_with_boundaries", "")
 
             if self._calculate_true_length(plaintext) <= self.max_length:
+                self.current_amount += 1
                 yield HomophonicCipher.from_json(json.dumps(cipher_obj))
                 continue
 
@@ -94,6 +102,7 @@ class CipherTruncator:
                 break
 
             if true_length > 0:
+                self.current_amount += 1
                 yield TextStream(
                     text=chunk_text.replace("_", ""),
                     target_length=target_length,

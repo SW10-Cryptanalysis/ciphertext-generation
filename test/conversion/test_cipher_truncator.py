@@ -70,3 +70,15 @@ def test_cipher_truncater_yields(mocker, test_case: TruncaterTestCase):
             assert result["target_length"] == test_case.sampled_lengths[idx]
         elif isinstance(result, SubstitutionCipher):
             assert result.plaintext_with_boundaries == test_case.expected_texts[idx]
+
+def test_cipher_truncator_max_amount():
+    """Validates the max amount parameter."""
+    truncater = CipherTruncator(
+        stream=iter([{"plaintext_with_boundaries": "short_text_here"}, {"plaintext_with_boundaries": "short_text_here"}]),
+        max_length=10,
+        length_sampler=lambda: 10,
+        max_amount=1,
+    )
+
+    results = list(truncater.process_stream())
+    assert len(results) == 1

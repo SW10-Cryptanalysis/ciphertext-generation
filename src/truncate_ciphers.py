@@ -26,15 +26,30 @@ def parse_args() -> argparse.Namespace:
         help="The output directory for the truncated dataset.",
     )
 
+    parser.add_argument(
+        "--max-amount",
+        "-m",
+        type=int,
+        default=10000,
+        required=False,
+        help="The max number of ciphers to truncate.",
+    )
+
     return parser.parse_args()
 
 
-def run_pipeline(dataset_dir: Path, output_dir: Path) -> None:
+def run_pipeline(
+    dataset_dir: Path,
+    output_dir: Path,
+    max_amount: int | None = None,
+) -> None:
     """Run the preprocessing pipeline.
 
     Args:
         dataset_dir (Path): The directory containing the dataset files.
         output_dir (Path): The directory to write the truncated files to.
+        max_amount (int | None, optional): The max number of ciphers to truncate.
+            Defaults to None.
 
     """
     file_paths = discover_dataset_files(dataset_dir)
@@ -43,10 +58,18 @@ def run_pipeline(dataset_dir: Path, output_dir: Path) -> None:
     config = TruncationConfig()
     length_sampler = create_length_sampler(config)
 
-    truncator = CipherTruncator(continuous_stream, config.max_length, length_sampler)
+    truncator = CipherTruncator(
+        continuous_stream,
+        config.max_length,
+        length_sampler,
+        max_amount,
+    )
     truncated_stream = truncator.process_stream()
 
     approximate_total = len(file_paths) * 10000
+
+    if max_amount:
+        approximate_total = max_amount
 
     with DatasetWriter(output_dir=output_dir) as writer:
         for truncated in tqdm(
@@ -61,4 +84,8 @@ def run_pipeline(dataset_dir: Path, output_dir: Path) -> None:
 
 if __name__ == "__main__":
     args = parse_args()
-    run_pipeline(args.directory, args.output)
+    run_pipeline(
+        args.directory,
+        args.output,
+        args.max_amount if args.max_amount else None,
+    )

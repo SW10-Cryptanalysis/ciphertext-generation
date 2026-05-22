@@ -36,6 +36,7 @@ omit = [
     "src/map_genres.py",
     "src/truncate_ciphers.py",
     "src/convert_to_monoalphabetic.py",
+    "src/generate_stats.py",
 ]
 
 [tool.coverage.report]

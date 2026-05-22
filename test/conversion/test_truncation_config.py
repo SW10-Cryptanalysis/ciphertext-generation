@@ -15,14 +15,14 @@ class SamplerTestCase:
 
 sampler_test_cases = [
     SamplerTestCase(
-        config=TruncationConfig(length_distribution=[((350, 1000), 1.0)]),
-        mocked_choice_index=0,
+        config=TruncationConfig(length_distribution=[((350, 1000), 1.0), ((1000, 2000), 0.5)]),
+        mocked_choice_index=1,
         mocked_randint_return=500,
         expected_length=500,
     ),
     SamplerTestCase(
         config=TruncationConfig(),
-        mocked_choice_index=1,
+        mocked_choice_index=0,
         mocked_randint_return=2500,
         expected_length=2500,
     ),
