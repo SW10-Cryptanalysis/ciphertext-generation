@@ -52,9 +52,6 @@ def main():
                             plaintext = data.get("plaintext", "")
 
                             # --- VERIFICATION STEP ---
-                            # Ensure every character in the plaintext has a mapping in the training key.
-                            # Since we filtered for len(key) >= 26 in the extraction script,
-                            # this should always pass, but it prevents crashes if a weird character sneaks in.
                             missing_chars = [
                                 char
                                 for char in set(plaintext)
@@ -69,12 +66,18 @@ def main():
                                 "text_with_boundaries": data.get(
                                     "plaintext_with_boundaries", plaintext
                                 ),
+                                "length": (
+                                    length if length is not None else len(plaintext)
+                                ),
+                                "target_length": (
+                                    length if length is not None else len(plaintext)
+                                ),
                                 "genres": data.get("genres", []),
                                 "source_id": data.get("source_id", "unknown"),
                                 "source_name": data.get("source_name", "unknown"),
                             }
 
-                            # Initialize cipher normally (this assigns redundancy and text)
+                            # Initialize cipher normally
                             cipher = HomophonicCipher(text_obj, redundancy=redundancy)
 
                             # --- INJECT TRAINING KEY ---
@@ -82,7 +85,6 @@ def main():
                             cipher.num_symbols = extracted_info["target_mu"]
 
                             # --- ENCIPHER & SAVE ---
-                            # This applies the key and handles your _apply_recurrence_and_remap_key() logic
                             cipher.encipher()
 
                             out_f.write(json.dumps(cipher.__json__()) + "\n")
