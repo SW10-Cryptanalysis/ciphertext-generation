@@ -7,11 +7,10 @@ import random
 class TruncationConfig:
     """Configuration for the cipher truncation process."""
 
-    max_length: int = 4000
+    max_length: int = 1000
     length_distribution: list[tuple[tuple[int, int], float]] = field(
         default_factory=lambda: [
-            ((350, 1000), 1 / 3),
-            ((1000, 4000), 2 / 3),
+            ((100, 1000), 1),
         ],
     )
 
