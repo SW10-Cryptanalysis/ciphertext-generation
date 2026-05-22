@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 
 # Adjust the import path if your root directory structure requires it
-from src.encipherment.cipher import HomophonicCipher
+from encipherment.cipher import HomophonicCipher
 
 
 def main():
