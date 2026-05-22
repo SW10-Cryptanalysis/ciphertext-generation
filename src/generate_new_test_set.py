@@ -3,8 +3,7 @@ import zipfile
 from pathlib import Path
 import sys
 
-# Adjust the import path if your root directory structure requires it
-from encipherment.cipher import HomophonicCipher
+from encipherment.cipher import HomophonicCipher, MonoalphabeticCipher
 
 
 def main():
@@ -77,14 +76,21 @@ def main():
                                 "source_name": data.get("source_name", "unknown"),
                             }
 
-                            # Initialize cipher normally
-                            cipher = HomophonicCipher(text_obj, redundancy=redundancy)
+                            # --- ROUTE TO CORRECT CIPHER CLASS ---
+                            if redundancy == 0:
+                                # Monoalphabetic initializes and enciphers automatically with a random key
+                                cipher = MonoalphabeticCipher(text_obj)
+                            else:
+                                cipher = HomophonicCipher(
+                                    text_obj, redundancy=redundancy
+                                )
 
                             # --- INJECT TRAINING KEY ---
                             cipher.key = training_key
                             cipher.num_symbols = extracted_info["target_mu"]
 
                             # --- ENCIPHER & SAVE ---
+                            # For Monoalphabetic, this safely overwrites the randomly generated ciphertext
                             cipher.encipher()
 
                             out_f.write(json.dumps(cipher.__json__()) + "\n")
