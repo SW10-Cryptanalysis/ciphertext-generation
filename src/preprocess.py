@@ -9,6 +9,8 @@ from datasets import Dataset, Features, Value
 from typing import Any, Generator
 from pathlib import Path
 from dataclasses import dataclass
+from io import BufferedReader
+from typing import IO
 
 os.environ["HF_DATASETS_CACHE"] = (
     "/ceph/project/SW10-CausalLM/ciphertext-generation/hf_cache"
@@ -315,25 +317,25 @@ def _yield_from_zip(zip_path: Path) -> Generator[dict[str, Any], None, None]:
 
         for filename in jsonl_files:
             with z.open(filename) as f:
-                for line in f:
-                    if line.strip():
-                        try:
-                            yield orjson.loads(line)
-                        except orjson.JSONDecodeError:
-                            # Fallback if the data is a Python dict string
-                            yield ast.literal_eval(line.decode("utf-8").strip())
+                yield from _read_jsonl(f)
 
 
 def _yield_from_jsonl(jsonl_path: Path) -> Generator[dict[str, Any], None, None]:
     """Yield JSON records from a single .jsonl file."""
     with open(jsonl_path, "rb") as f:
-        for line in f:
-            if line.strip():
-                try:
-                    yield orjson.loads(line)
-                except orjson.JSONDecodeError:
-                    # Fallback if the data is a Python dict string
-                    yield ast.literal_eval(line.decode("utf-8").strip())
+        yield from _read_jsonl(f)
+
+
+def _read_jsonl(
+    file: BufferedReader | IO[bytes],
+) -> Generator[dict[str, Any], None, None]:
+    """Read JSON lines from a file."""
+    for line in file:
+        if line.strip():
+            try:
+                yield orjson.loads(line)
+            except orjson.JSONDecodeError:
+                yield ast.literal_eval(line.decode("utf-8").strip())
 
 
 def _json_generator(path: Path) -> Generator[dict[str, Any], None, None]:
