@@ -3,7 +3,6 @@ import json
 import zipfile
 from pathlib import Path
 
-# The test matrix from your DatasetConfig
 TEST_MATRIX = {
     350: [5, 10, 15, 0],
     400: [5, 10, 15, 0],
@@ -22,7 +21,7 @@ TEST_MATRIX = {
 def calculate_target_mu(length: int, redundancy: int) -> int:
     """Calculate the required number of homophones based on length and redundancy."""
     if redundancy == 0:
-        return 26  # Monoalphabetic baseline
+        return 26
     return round(length / redundancy)
 
 
@@ -30,7 +29,6 @@ def main():
     training_dir = Path("/ceph/project/SW10-CausalLM/Ciphers/Training")
     output_file = Path("extracted_test_keys.json")
 
-    # 1. Build the shopping list
     targets = {}
     for length, redundancies in TEST_MATRIX.items():
         for red in redundancies:
@@ -44,9 +42,8 @@ def main():
             }
 
     missing_count = len(targets)
-    print(f"Starting extraction. Looking for {missing_count} distinct keys...")
+    print(f"Looking for {missing_count} fully populated keys...")
 
-    # 2. Stream the zip files
     for zip_name in os.listdir(training_dir):
         if not zip_name.endswith(".zip"):
             continue
@@ -69,21 +66,20 @@ def main():
                         except json.JSONDecodeError:
                             continue
 
-                        # Safely grab the key and count symbols
                         key_dict = data.get("key", {})
 
-                        # Crucial safeguard: ensure the training key maps all 26 letters.
-                        # If a key only maps 24 letters because the training plaintext was short,
-                        # it will throw a KeyError when enciphering a test text containing the missing letters.
-                        if len(key_dict) < 26:
+                        # --- THE NEW STRICT FILTER ---
+                        # 1. Must have all 26 letters mapped in the dictionary
+                        # 2. NONE of those letters can have an empty list `[]`
+                        if len(key_dict) < 26 or any(
+                            len(homophones) == 0 for homophones in key_dict.values()
+                        ):
                             continue
 
-                        # Determine mu (num_symbols). Fallback to manual sum if not in metadata.
                         num_symbols = data.get("num_symbols")
                         if num_symbols is None:
                             num_symbols = sum(len(v) for v in key_dict.values())
 
-                        # 3. Check off our shopping list
                         for bucket_id, target_info in targets.items():
                             if (
                                 target_info["key"] is None
@@ -92,25 +88,22 @@ def main():
                                 target_info["key"] = key_dict
                                 missing_count -= 1
                                 print(
-                                    f"  [+] Found key for N={target_info['length']}, Red={target_info['redundancy']} (mu={num_symbols}). {missing_count} left."
+                                    f"  [+] Found perfect key for N={target_info['length']}, Red={target_info['redundancy']} (mu={num_symbols}). {missing_count} left."
                                 )
-                                break  # Ensure this specific JSONL entry is only consumed by one bucket
+                                break
 
                 if missing_count == 0:
                     break
         if missing_count == 0:
             break
 
-    # 4. Save the mapped targets
     if missing_count > 0:
-        print(f"Warning: Finished scanning but still missing {missing_count} keys.")
+        print(f"Warning: Missing {missing_count} keys.")
     else:
-        print("Success! Found all 81 keys.")
+        print("Success! Found all 81 perfect keys.")
 
     with open(output_file, "w") as f:
         json.dump(targets, f, indent=4)
-
-    print(f"Keys saved to {output_file.resolve()}")
 
 
 if __name__ == "__main__":
