@@ -29,7 +29,6 @@ def main():
     for length, redundancies in TEST_MATRIX.items():
         for red in redundancies:
             bucket_id = f"{length}_{red}"
-            # Store the target values so we can compare ranges later
             targets[bucket_id] = {
                 "target_length": length,
                 "target_redundancy": red,
@@ -38,7 +37,9 @@ def main():
 
     missing_ciphers = len(targets)
     print(f"Goal: Extract {missing_ciphers} ciphers from the training dataset.\n")
-    print("Constraints: Length ±10, Redundancy ±1.\n")
+    print("Constraints:")
+    print("  - Monoalphabetic (Red=0): Length ±25, Redundancy exact match.")
+    print("  - Homophonic   (Red>0): Length ±10, Redundancy ±1.\n")
 
     if not training_dir.exists():
         print(f"Error: Could not find training directory at {training_dir}")
@@ -64,7 +65,6 @@ def main():
                                 break
 
                             try:
-                                # Decode bytes to string
                                 line_str = line.decode("utf-8")
                                 train_data = json.loads(line_str)
                             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -73,7 +73,6 @@ def main():
                             l = train_data.get("length")
                             r = train_data.get("redundancy")
 
-                            # Skip if the data is malformed and missing these fields
                             if l is None or r is None:
                                 continue
 
@@ -81,8 +80,18 @@ def main():
                             matched_bucket = None
                             for bucket_id, info in targets.items():
                                 if not info["found"]:
-                                    len_match = abs(l - info["target_length"]) <= 10
-                                    red_match = abs(r - info["target_redundancy"]) <= 1
+                                    target_len = info["target_length"]
+                                    target_red = info["target_redundancy"]
+
+                                    # Dynamic tolerance logic based on cipher type
+                                    if target_red == 0:
+                                        # Monoalphabetic constraints
+                                        len_match = abs(l - target_len) <= 25
+                                        red_match = r == 0
+                                    else:
+                                        # Homophonic constraints
+                                        len_match = abs(l - target_len) <= 10
+                                        red_match = abs(r - target_red) <= 1
 
                                     if len_match and red_match:
                                         matched_bucket = bucket_id
