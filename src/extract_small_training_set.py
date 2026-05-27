@@ -38,7 +38,7 @@ def main():
 
     missing_ciphers = len(targets)
     print(f"Goal: Extract {missing_ciphers} ciphers from the training dataset.\n")
-    print("Constraints: Length ±5, Redundancy ±1.\n")
+    print("Constraints: Length ±10, Redundancy ±1.\n")
 
     if not training_dir.exists():
         print(f"Error: Could not find training directory at {training_dir}")
@@ -81,7 +81,7 @@ def main():
                             matched_bucket = None
                             for bucket_id, info in targets.items():
                                 if not info["found"]:
-                                    len_match = abs(l - info["target_length"]) <= 5
+                                    len_match = abs(l - info["target_length"]) <= 10
                                     red_match = abs(r - info["target_redundancy"]) <= 1
 
                                     if len_match and red_match:
