@@ -29,10 +29,16 @@ def main():
     for length, redundancies in TEST_MATRIX.items():
         for red in redundancies:
             bucket_id = f"{length}_{red}"
-            targets[bucket_id] = False  # False indicates we haven't found a match yet
+            # Store the target values so we can compare ranges later
+            targets[bucket_id] = {
+                "target_length": length,
+                "target_redundancy": red,
+                "found": False,
+            }
 
     missing_ciphers = len(targets)
     print(f"Goal: Extract {missing_ciphers} ciphers from the training dataset.\n")
+    print("Constraints: Length ±5, Redundancy ±1.\n")
 
     if not training_dir.exists():
         print(f"Error: Could not find training directory at {training_dir}")
@@ -64,21 +70,31 @@ def main():
                             except (json.JSONDecodeError, UnicodeDecodeError):
                                 continue
 
-                            # Extract criteria
                             l = train_data.get("length")
                             r = train_data.get("redundancy")
-                            bucket_id = f"{l}_{r}"
 
-                            # If it's a target we need and haven't collected yet
-                            if bucket_id in targets and not targets[bucket_id]:
-                                # Write the unmodified JSON directly to our new file
+                            # Skip if the data is malformed and missing these fields
+                            if l is None or r is None:
+                                continue
+
+                            # Check if this cipher fits into any missing target bucket
+                            matched_bucket = None
+                            for bucket_id, info in targets.items():
+                                if not info["found"]:
+                                    len_match = abs(l - info["target_length"]) <= 5
+                                    red_match = abs(r - info["target_redundancy"]) <= 1
+
+                                    if len_match and red_match:
+                                        matched_bucket = bucket_id
+                                        break
+
+                            # If it fits a needed bucket, save it
+                            if matched_bucket:
                                 out_f.write(line_str.strip() + "\n")
-
-                                # Mark as found
-                                targets[bucket_id] = True
+                                targets[matched_bucket]["found"] = True
                                 missing_ciphers -= 1
                                 print(
-                                    f"  [+] Found N={l}, Red={r}. {missing_ciphers} left."
+                                    f"  [+] Found N={l}, Red={r} (Fulfilled target {matched_bucket}). {missing_ciphers} left."
                                 )
 
                     if missing_ciphers == 0:
@@ -92,9 +108,9 @@ def main():
         print(
             f"\nWarning: {missing_ciphers} buckets couldn't be found in the training data."
         )
-        for bucket, found in targets.items():
-            if not found:
-                print(f"  - Missing: Length_Redundancy = {bucket}")
+        for bucket, info in targets.items():
+            if not info["found"]:
+                print(f"  - Missing: Target {bucket}")
     else:
         print(
             f"\nSuccess! Extracted all 81 training ciphers. Saved to {output_file.resolve()}"
